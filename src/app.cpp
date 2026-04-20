@@ -50,22 +50,12 @@ void elfeed_init(Elfeed *app)
     db_open(app);
     db_load_feeds(app);
     app->current_filter = filter_parse(app->default_filter);
-
-    // Restore persistent UI toggles
-    std::string s;
-    s = db_load_ui_state(app, "show_log");
-    if (!s.empty()) app->show_log = (s == "1");
-    s = db_load_ui_state(app, "show_downloads");
-    if (!s.empty()) app->show_downloads = (s == "1");
 }
 
 void elfeed_shutdown(Elfeed *app)
 {
     fetch_stop(app);
     download_stop(app);
-    db_save_ui_state(app, "show_log", app->show_log ? "1" : "0");
-    db_save_ui_state(app, "show_downloads",
-                     app->show_downloads ? "1" : "0");
     db_close(app);
 }
 

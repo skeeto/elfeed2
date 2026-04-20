@@ -1,26 +1,25 @@
-#ifndef ELFEED_LOG_FRAME_HPP
-#define ELFEED_LOG_FRAME_HPP
+#ifndef ELFEED_LOG_PANEL_HPP
+#define ELFEED_LOG_PANEL_HPP
 
-#include <wx/frame.h>
+#include <wx/panel.h>
 #include "elfeed.hpp"
 
 class wxCheckBox;
-class LogList;  // defined in log_frame.cpp
+class LogList;  // defined in log_panel.cpp
 
-// Toplevel window showing the fetch/download log. 4 columns: Time,
+// Fetch/download log as a wxAUI-dockable panel. Four columns: Time,
 // Type, URL, Result. Filter checkboxes at top hide message kinds.
-class LogFrame : public wxFrame {
+class LogPanel : public wxPanel {
 public:
-    LogFrame(wxWindow *parent, Elfeed *app);
+    LogPanel(wxWindow *parent, Elfeed *app);
 
-    // Snapshot filtered log entries and re-size the list. Safe on UI
-    // thread; the log mutex is taken internally.
+    // Snapshot filtered log entries and re-size the list. UI-thread
+    // only; takes app->log_mutex internally.
     void refresh();
 
 private:
     void on_filter_changed(wxCommandEvent &);
     void on_clear(wxCommandEvent &);
-    void on_close(wxCloseEvent &);
 
     Elfeed *app_;
     wxCheckBox *cb_info_ = nullptr;
@@ -31,7 +30,6 @@ private:
     LogList *list_ = nullptr;
 
     friend class LogList;
-    // Filtered snapshot that the virtual LogList reads.
     std::vector<LogEntry> snapshot_;
 };
 

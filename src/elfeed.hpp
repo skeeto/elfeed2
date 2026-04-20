@@ -147,9 +147,8 @@ struct Elfeed {
     std::mutex log_mutex;
     std::vector<LogEntry> log;
 
-    // Persistent UI toggles (saved to DB)
-    bool show_log = false;
-    bool show_downloads = false;
+    // Persistent UI toggles (saved to DB). Pane visibility lives in
+    // the wxAUI perspective string under DB key "layout".
     bool log_show_info = true;
     bool log_show_requests = true;
     bool log_show_success = true;

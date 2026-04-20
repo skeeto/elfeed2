@@ -130,8 +130,9 @@ set(elfeed_sources
   src/main_frame.cpp
   src/entry_list.cpp
   src/entry_detail.cpp
-  src/log_frame.cpp
-  src/downloads_frame.cpp
+  src/feeds_panel.cpp
+  src/log_panel.cpp
+  src/downloads_panel.cpp
   src/db.cpp
   src/feed.cpp
   src/filter.cpp
@@ -149,7 +150,7 @@ endif()
 add_executable(elfeed2 WIN32 MACOSX_BUNDLE ${elfeed_sources})
 
 target_link_libraries(elfeed2 PRIVATE
-  wx::core wx::base wx::html
+  wx::core wx::base wx::html wx::aui
   sqlite3 pugixml
 )
 

@@ -1,24 +1,23 @@
-#include "log_frame.hpp"
+#include "log_panel.hpp"
 
 #include <wx/button.h>
 #include <wx/checkbox.h>
 #include <wx/listctrl.h>
 #include <wx/sizer.h>
-#include <wx/stattext.h>
 
 #include <ctime>
 
-// Virtual list that reads from LogFrame::snapshot_.
+// Virtual list that reads from LogPanel::snapshot_.
 class LogList : public wxListCtrl {
 public:
-    LogList(wxWindow *parent, LogFrame *owner)
+    LogList(wxWindow *parent, LogPanel *owner)
         : wxListCtrl(parent, wxID_ANY, wxDefaultPosition, wxDefaultSize,
                      wxLC_REPORT | wxLC_VIRTUAL)
         , owner_(owner)
     {
-        AppendColumn("Time", wxLIST_FORMAT_LEFT, FromDIP(140));
-        AppendColumn("Type", wxLIST_FORMAT_LEFT, FromDIP(50));
-        AppendColumn("URL",  wxLIST_FORMAT_LEFT, FromDIP(250));
+        AppendColumn("Time",   wxLIST_FORMAT_LEFT, FromDIP(140));
+        AppendColumn("Type",   wxLIST_FORMAT_LEFT, FromDIP(50));
+        AppendColumn("URL",    wxLIST_FORMAT_LEFT, FromDIP(250));
         AppendColumn("Result", wxLIST_FORMAT_LEFT, FromDIP(400));
     }
 
@@ -26,7 +25,7 @@ protected:
     wxString OnGetItemText(long item, long column) const override;
 
 private:
-    LogFrame *owner_;
+    LogPanel *owner_;
 };
 
 static const char *kind_name(LogKind k)
@@ -70,57 +69,50 @@ wxString LogList::OnGetItemText(long item, long column) const
     return {};
 }
 
-LogFrame::LogFrame(wxWindow *parent, Elfeed *app)
-    : wxFrame(parent, wxID_ANY, "Log", wxDefaultPosition,
-              parent->FromDIP(wxSize(900, 400)))
+LogPanel::LogPanel(wxWindow *parent, Elfeed *app)
+    : wxPanel(parent, wxID_ANY)
     , app_(app)
 {
-    auto *panel = new wxPanel(this);
     auto *vsz = new wxBoxSizer(wxVERTICAL);
 
     // Toolbar-like row of filter checkboxes and Clear button
     auto *hsz = new wxBoxSizer(wxHORIZONTAL);
-    cb_info_       = new wxCheckBox(panel, wxID_ANY, "Info");
-    cb_req_        = new wxCheckBox(panel, wxID_ANY, "Requests");
-    cb_ok_         = new wxCheckBox(panel, wxID_ANY, "Success");
-    cb_err_        = new wxCheckBox(panel, wxID_ANY, "Errors");
-    cb_autoscroll_ = new wxCheckBox(panel, wxID_ANY, "Auto-scroll");
+    cb_info_       = new wxCheckBox(this, wxID_ANY, "Info");
+    cb_req_        = new wxCheckBox(this, wxID_ANY, "Requests");
+    cb_ok_         = new wxCheckBox(this, wxID_ANY, "Success");
+    cb_err_        = new wxCheckBox(this, wxID_ANY, "Errors");
+    cb_autoscroll_ = new wxCheckBox(this, wxID_ANY, "Auto-scroll");
     cb_info_->SetValue(app_->log_show_info);
     cb_req_->SetValue(app_->log_show_requests);
     cb_ok_->SetValue(app_->log_show_success);
     cb_err_->SetValue(app_->log_show_errors);
     cb_autoscroll_->SetValue(app_->log_auto_scroll);
-    hsz->Add(cb_info_, 0, wxALL, FromDIP(4));
-    hsz->Add(cb_req_,  0, wxALL, FromDIP(4));
-    hsz->Add(cb_ok_,   0, wxALL, FromDIP(4));
-    hsz->Add(cb_err_,  0, wxALL, FromDIP(4));
+    hsz->Add(cb_info_,       0, wxALL, FromDIP(4));
+    hsz->Add(cb_req_,        0, wxALL, FromDIP(4));
+    hsz->Add(cb_ok_,         0, wxALL, FromDIP(4));
+    hsz->Add(cb_err_,        0, wxALL, FromDIP(4));
     hsz->Add(cb_autoscroll_, 0, wxALL, FromDIP(4));
     hsz->AddStretchSpacer();
-    auto *btn_clear = new wxButton(panel, wxID_CLEAR, "Clear");
+    auto *btn_clear = new wxButton(this, wxID_CLEAR, "Clear");
     hsz->Add(btn_clear, 0, wxALL, FromDIP(4));
     vsz->Add(hsz, 0, wxEXPAND);
 
-    list_ = new LogList(panel, this);
+    list_ = new LogList(this, this);
     vsz->Add(list_, 1, wxEXPAND);
 
-    panel->SetSizer(vsz);
+    SetSizer(vsz);
 
-    auto *outer = new wxBoxSizer(wxVERTICAL);
-    outer->Add(panel, 1, wxEXPAND);
-    SetSizer(outer);
-
-    cb_info_->Bind(wxEVT_CHECKBOX, &LogFrame::on_filter_changed, this);
-    cb_req_->Bind(wxEVT_CHECKBOX, &LogFrame::on_filter_changed, this);
-    cb_ok_->Bind(wxEVT_CHECKBOX, &LogFrame::on_filter_changed, this);
-    cb_err_->Bind(wxEVT_CHECKBOX, &LogFrame::on_filter_changed, this);
-    cb_autoscroll_->Bind(wxEVT_CHECKBOX, &LogFrame::on_filter_changed, this);
-    btn_clear->Bind(wxEVT_BUTTON, &LogFrame::on_clear, this);
-    Bind(wxEVT_CLOSE_WINDOW, &LogFrame::on_close, this);
+    cb_info_->Bind(wxEVT_CHECKBOX, &LogPanel::on_filter_changed, this);
+    cb_req_->Bind(wxEVT_CHECKBOX, &LogPanel::on_filter_changed, this);
+    cb_ok_->Bind(wxEVT_CHECKBOX, &LogPanel::on_filter_changed, this);
+    cb_err_->Bind(wxEVT_CHECKBOX, &LogPanel::on_filter_changed, this);
+    cb_autoscroll_->Bind(wxEVT_CHECKBOX, &LogPanel::on_filter_changed, this);
+    btn_clear->Bind(wxEVT_BUTTON, &LogPanel::on_clear, this);
 
     refresh();
 }
 
-void LogFrame::refresh()
+void LogPanel::refresh()
 {
     snapshot_.clear();
     {
@@ -143,7 +135,7 @@ void LogFrame::refresh()
         list_->EnsureVisible((long)snapshot_.size() - 1);
 }
 
-void LogFrame::on_filter_changed(wxCommandEvent &)
+void LogPanel::on_filter_changed(wxCommandEvent &)
 {
     app_->log_show_info     = cb_info_->GetValue();
     app_->log_show_requests = cb_req_->GetValue();
@@ -153,22 +145,11 @@ void LogFrame::on_filter_changed(wxCommandEvent &)
     refresh();
 }
 
-void LogFrame::on_clear(wxCommandEvent &)
+void LogPanel::on_clear(wxCommandEvent &)
 {
     {
         std::lock_guard lock(app_->log_mutex);
         app_->log.clear();
     }
     refresh();
-}
-
-void LogFrame::on_close(wxCloseEvent &e)
-{
-    if (e.CanVeto()) {
-        Hide();
-        app_->show_log = false;
-        e.Veto();
-    } else {
-        Destroy();
-    }
 }

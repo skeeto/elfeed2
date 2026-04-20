@@ -1,17 +1,17 @@
-#ifndef ELFEED_DOWNLOADS_FRAME_HPP
-#define ELFEED_DOWNLOADS_FRAME_HPP
+#ifndef ELFEED_DOWNLOADS_PANEL_HPP
+#define ELFEED_DOWNLOADS_PANEL_HPP
 
-#include <wx/frame.h>
+#include <wx/panel.h>
 #include "elfeed.hpp"
 
 class wxListCtrl;
 class wxButton;
 
-// Toplevel window showing the download queue. Columns: %, Size, Name,
+// Download queue as a wxAUI-dockable panel. Columns: %, Size, Name,
 // Failures. Pause/Resume/Remove buttons act on the selected row(s).
-class DownloadsFrame : public wxFrame {
+class DownloadsPanel : public wxPanel {
 public:
-    DownloadsFrame(wxWindow *parent, Elfeed *app);
+    DownloadsPanel(wxWindow *parent, Elfeed *app);
 
     // Re-snapshot app_->downloads under the lock and refresh the list.
     void refresh();
@@ -19,7 +19,6 @@ public:
 private:
     void on_pause(wxCommandEvent &);
     void on_remove(wxCommandEvent &);
-    void on_close(wxCloseEvent &);
 
     Elfeed *app_;
     wxListCtrl *list_ = nullptr;

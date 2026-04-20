@@ -1,17 +1,18 @@
 #include "main_frame.hpp"
 
-#include "downloads_frame.hpp"
+#include "downloads_panel.hpp"
 #include "entry_detail.hpp"
 #include "entry_list.hpp"
 #include "events.hpp"
-#include "log_frame.hpp"
+#include "feeds_panel.hpp"
+#include "log_panel.hpp"
 
+#include <wx/aui/framemanager.h>
 #include <wx/clipbrd.h>
 #include <wx/menu.h>
 #include <wx/msgdlg.h>
 #include <wx/srchctrl.h>
 #include <wx/sizer.h>
-#include <wx/splitter.h>
 #include <wx/statusbr.h>
 #include <wx/utils.h>
 
@@ -19,6 +20,8 @@
 
 enum {
     ID_Fetch = wxID_HIGHEST + 1,
+    ID_ToggleFeeds,
+    ID_TogglePreview,
     ID_ToggleLog,
     ID_ToggleDownloads,
 };
@@ -39,31 +42,20 @@ MainFrame::MainFrame(Elfeed *app)
 
     CreateStatusBar(1);
 
-    // Initial query + UI state
     requery();
     update_status();
     update_menu_checks();
 
-    // Log / Downloads frames — created on demand, but if persistent UI
-    // state says they were open, show them.
-    if (app_->show_log) {
-        log_frame_ = new LogFrame(this, app_);
-        log_frame_->Show();
-    }
-    if (app_->show_downloads) {
-        downloads_frame_ = new DownloadsFrame(this, app_);
-        downloads_frame_->Show();
-    }
-
-    // Focus the entry list so vi-style keys work immediately after
-    // launch. SetFocus() before Show() is a no-op on some platforms,
-    // so defer until the first idle tick.
+    // Focus the entry list so vi-style keys work immediately.
     CallAfter([this] { list_->SetFocus(); });
 }
 
 MainFrame::~MainFrame()
 {
     app_->event_sink = nullptr;
+    // mgr_.UnInit() happens in on_close, but cover the path where
+    // the frame is destroyed without a close event (rare).
+    mgr_.UnInit();
 }
 
 // ---- Building ------------------------------------------------------
@@ -79,7 +71,12 @@ void MainFrame::build_menus()
     mbar->Append(m_elfeed, "&Elfeed");
 
     auto *m_view = new wxMenu;
-    menu_log_id_ = m_view->AppendCheckItem(ID_ToggleLog, "&Log")->GetId();
+    menu_feeds_id_ =
+        m_view->AppendCheckItem(ID_ToggleFeeds,     "&Feeds")->GetId();
+    menu_preview_id_ =
+        m_view->AppendCheckItem(ID_TogglePreview,   "&Preview")->GetId();
+    menu_log_id_ =
+        m_view->AppendCheckItem(ID_ToggleLog,       "&Log")->GetId();
     menu_downloads_id_ =
         m_view->AppendCheckItem(ID_ToggleDownloads, "&Downloads")->GetId();
     mbar->Append(m_view, "&View");
@@ -93,10 +90,11 @@ void MainFrame::build_menus()
 
 void MainFrame::build_widgets()
 {
-    auto *panel = new wxPanel(this);
+    auto *outer = new wxPanel(this);
     auto *vsz = new wxBoxSizer(wxVERTICAL);
 
-    filter_ = new wxSearchCtrl(panel, wxID_ANY,
+    // Filter bar stays outside AUI as a fixed top strip.
+    filter_ = new wxSearchCtrl(outer, wxID_ANY,
                                wxString::FromUTF8(app_->default_filter),
                                wxDefaultPosition, wxDefaultSize,
                                wxTE_PROCESS_ENTER);
@@ -104,34 +102,85 @@ void MainFrame::build_widgets()
     filter_->ShowCancelButton(true);
     vsz->Add(filter_, 0, wxEXPAND | wxALL, FromDIP(4));
 
-    splitter_ = new wxSplitterWindow(panel, wxID_ANY,
-                                     wxDefaultPosition, wxDefaultSize,
-                                     wxSP_LIVE_UPDATE | wxSP_THIN_SASH);
-    splitter_->SetMinimumPaneSize(FromDIP(100));
+    // AUI manager lives on a host panel that fills the rest.
+    auto *aui_host = new wxPanel(outer, wxID_ANY);
+    vsz->Add(aui_host, 1, wxEXPAND);
 
-    list_ = new EntryList(splitter_, app_);
-    detail_ = new EntryDetail(splitter_, app_);
-    splitter_->SplitHorizontally(list_, detail_, FromDIP(350));
-    splitter_->SetSashGravity(0.55);
-    vsz->Add(splitter_, 1, wxEXPAND);
+    outer->SetSizer(vsz);
 
-    panel->SetSizer(vsz);
+    auto *frame_sz = new wxBoxSizer(wxVERTICAL);
+    frame_sz->Add(outer, 1, wxEXPAND);
+    SetSizer(frame_sz);
 
-    auto *outer = new wxBoxSizer(wxVERTICAL);
-    outer->Add(panel, 1, wxEXPAND);
-    SetSizer(outer);
+    mgr_.SetManagedWindow(aui_host);
+
+    list_      = new EntryList(aui_host, app_);
+    detail_    = new EntryDetail(aui_host, app_);
+    feeds_     = new FeedsPanel(aui_host, app_,
+                                [this](const std::string &url) {
+                                    set_filter_to_feed(url);
+                                });
+    log_       = new LogPanel(aui_host, app_);
+    downloads_ = new DownloadsPanel(aui_host, app_);
+
+    mgr_.AddPane(list_,
+                 wxAuiPaneInfo()
+                     .Name("entry_list")
+                     .CenterPane()
+                     .CaptionVisible(false));
+    mgr_.AddPane(detail_,
+                 wxAuiPaneInfo()
+                     .Name("entry_detail")
+                     .Caption("Preview")
+                     .Bottom()
+                     .BestSize(FromDIP(wxSize(-1, 350)))
+                     .MinSize(FromDIP(wxSize(-1, 100)))
+                     .Show());
+    mgr_.AddPane(feeds_,
+                 wxAuiPaneInfo()
+                     .Name("feeds")
+                     .Caption("Feeds")
+                     .Left()
+                     .BestSize(FromDIP(wxSize(220, -1)))
+                     .MinSize(FromDIP(wxSize(150, -1)))
+                     .Hide());
+    mgr_.AddPane(log_,
+                 wxAuiPaneInfo()
+                     .Name("log")
+                     .Caption("Log")
+                     .Bottom()
+                     .BestSize(FromDIP(wxSize(-1, 200)))
+                     .MinSize(FromDIP(wxSize(-1, 80)))
+                     .Hide());
+    mgr_.AddPane(downloads_,
+                 wxAuiPaneInfo()
+                     .Name("downloads")
+                     .Caption("Downloads")
+                     .Bottom()
+                     .BestSize(FromDIP(wxSize(-1, 200)))
+                     .MinSize(FromDIP(wxSize(-1, 80)))
+                     .Hide());
+
+    // Restore saved layout if present; otherwise keep defaults.
+    std::string saved = db_load_ui_state(app_, "layout");
+    if (!saved.empty())
+        mgr_.LoadPerspective(wxString::FromUTF8(saved), false);
+
+    mgr_.Update();
 }
 
 void MainFrame::bind_events()
 {
     Bind(wxEVT_ELFEED_WAKE, &MainFrame::on_wake, this);
-    Bind(wxEVT_MENU, &MainFrame::on_fetch_all, this, ID_Fetch);
-    Bind(wxEVT_MENU, &MainFrame::on_toggle_log, this, ID_ToggleLog);
-    Bind(wxEVT_MENU, &MainFrame::on_toggle_downloads, this,
-         ID_ToggleDownloads);
+    Bind(wxEVT_MENU, &MainFrame::on_fetch_all,        this, ID_Fetch);
+    Bind(wxEVT_MENU, &MainFrame::on_toggle_feeds,     this, ID_ToggleFeeds);
+    Bind(wxEVT_MENU, &MainFrame::on_toggle_preview,   this, ID_TogglePreview);
+    Bind(wxEVT_MENU, &MainFrame::on_toggle_log,       this, ID_ToggleLog);
+    Bind(wxEVT_MENU, &MainFrame::on_toggle_downloads, this, ID_ToggleDownloads);
     Bind(wxEVT_MENU, &MainFrame::on_about, this, wxID_ABOUT);
-    Bind(wxEVT_MENU, &MainFrame::on_quit, this, wxID_EXIT);
+    Bind(wxEVT_MENU, &MainFrame::on_quit,  this, wxID_EXIT);
     Bind(wxEVT_CLOSE_WINDOW, &MainFrame::on_close, this);
+    Bind(wxEVT_AUI_PANE_CLOSE, &MainFrame::on_pane_close, this);
 
     filter_->Bind(wxEVT_TEXT, &MainFrame::on_filter_text, this);
     filter_->Bind(wxEVT_SEARCH_CANCEL, [this](wxCommandEvent &) {
@@ -150,8 +199,6 @@ void MainFrame::bind_events()
 
 void MainFrame::requery()
 {
-    // Preserve selection across re-query: save the (namespace,id) of the
-    // focused item, then search for it in the new entries.
     std::string sel_ns, sel_id;
     long primary = list_->primary();
     if (primary >= 0 && (size_t)primary < app_->entries.size()) {
@@ -180,7 +227,6 @@ void MainFrame::requery()
         list_->EnsureVisible(new_primary);
     }
 
-    // Refresh detail pane from the new primary
     if (new_primary >= 0 && (size_t)new_primary < app_->entries.size())
         detail_->show_entry(&app_->entries[(size_t)new_primary]);
     else
@@ -211,26 +257,60 @@ void MainFrame::update_status()
     SetStatusText(msg);
 }
 
+bool MainFrame::pane_shown(const char *name) const
+{
+    // GetPane is logically const here, but the wxAUI API isn't const-correct.
+    auto &info = const_cast<wxAuiManager &>(mgr_).GetPane(name);
+    return info.IsOk() && info.IsShown();
+}
+
 void MainFrame::update_menu_checks()
 {
     auto *mbar = GetMenuBar();
     if (!mbar) return;
-    mbar->Check(menu_log_id_, app_->show_log);
-    mbar->Check(menu_downloads_id_, app_->show_downloads);
+    mbar->Check(menu_feeds_id_,     pane_shown("feeds"));
+    mbar->Check(menu_preview_id_,   pane_shown("entry_detail"));
+    mbar->Check(menu_log_id_,       pane_shown("log"));
+    mbar->Check(menu_downloads_id_, pane_shown("downloads"));
+}
+
+void MainFrame::toggle_pane(const char *name)
+{
+    auto &info = mgr_.GetPane(name);
+    if (!info.IsOk()) return;
+    info.Show(!info.IsShown());
+    mgr_.Update();
+    update_menu_checks();
+    if (info.IsShown()) {
+        if (std::string(name) == "log" && log_) log_->refresh();
+        else if (std::string(name) == "downloads" && downloads_)
+            downloads_->refresh();
+        else if (std::string(name) == "feeds" && feeds_)
+            feeds_->refresh();
+    }
+}
+
+void MainFrame::set_filter_to_feed(const std::string &feed_url)
+{
+    filter_->ChangeValue(wxString::FromUTF8("=" + feed_url));
+    app_->current_filter = filter_parse("=" + feed_url);
+    requery();
+    update_status();
 }
 
 // ---- Event handlers ------------------------------------------------
 
 void MainFrame::on_wake(wxThreadEvent &)
 {
-    // Only requery the DB if fetch actually committed new entries.
-    // Most wakes are just log lines or download progress updates.
-    if (fetch_process_results(app_)) requery();
+    bool new_entries = fetch_process_results(app_);
+    if (new_entries) {
+        requery();
+        if (feeds_) feeds_->refresh();  // titles may have been filled in
+    }
     update_status();
-    download_tick(app_);  // start the next queued download if idle
-    if (log_frame_ && log_frame_->IsShown()) log_frame_->refresh();
-    if (downloads_frame_ && downloads_frame_->IsShown())
-        downloads_frame_->refresh();
+    download_tick(app_);
+    if (pane_shown("log")       && log_)       log_->refresh();
+    if (pane_shown("downloads") && downloads_) downloads_->refresh();
 }
 
 void MainFrame::on_filter_text(wxCommandEvent &)
@@ -247,34 +327,10 @@ void MainFrame::on_fetch_all(wxCommandEvent &)
     update_status();
 }
 
-void MainFrame::on_toggle_log(wxCommandEvent &)
-{
-    if (!log_frame_) log_frame_ = new LogFrame(this, app_);
-    if (log_frame_->IsShown()) {
-        log_frame_->Hide();
-        app_->show_log = false;
-    } else {
-        log_frame_->Show();
-        log_frame_->refresh();
-        app_->show_log = true;
-    }
-    update_menu_checks();
-}
-
-void MainFrame::on_toggle_downloads(wxCommandEvent &)
-{
-    if (!downloads_frame_)
-        downloads_frame_ = new DownloadsFrame(this, app_);
-    if (downloads_frame_->IsShown()) {
-        downloads_frame_->Hide();
-        app_->show_downloads = false;
-    } else {
-        downloads_frame_->Show();
-        downloads_frame_->refresh();
-        app_->show_downloads = true;
-    }
-    update_menu_checks();
-}
+void MainFrame::on_toggle_feeds(wxCommandEvent &)     { toggle_pane("feeds"); }
+void MainFrame::on_toggle_preview(wxCommandEvent &)   { toggle_pane("entry_detail"); }
+void MainFrame::on_toggle_log(wxCommandEvent &)       { toggle_pane("log"); }
+void MainFrame::on_toggle_downloads(wxCommandEvent &) { toggle_pane("downloads"); }
 
 void MainFrame::on_about(wxCommandEvent &)
 {
@@ -289,9 +345,20 @@ void MainFrame::on_quit(wxCommandEvent &)
 
 void MainFrame::on_close(wxCloseEvent &)
 {
-    if (log_frame_) log_frame_->Destroy();
-    if (downloads_frame_) downloads_frame_->Destroy();
+    // Save perspective before tearing down
+    wxString persp = mgr_.SavePerspective();
+    db_save_ui_state(app_, "layout", persp.utf8_string().c_str());
+    mgr_.UnInit();
     Destroy();
+}
+
+void MainFrame::on_pane_close(wxAuiManagerEvent &e)
+{
+    // wxAUI just closed a pane via its X button. Our menu check marks
+    // still reflect the pre-close state; refresh them on the next idle
+    // tick (after the pane info has actually flipped).
+    (void)e;
+    CallAfter([this] { update_menu_checks(); });
 }
 
 void MainFrame::on_list_selected(wxListEvent &e)
@@ -303,7 +370,6 @@ void MainFrame::on_list_selected(wxListEvent &e)
 
 void MainFrame::on_list_activated(wxListEvent &)
 {
-    // Double-click or Enter: mark read + advance (same as 'r')
     action_mark_read();
 }
 
@@ -311,8 +377,6 @@ void MainFrame::on_list_key(wxKeyEvent &e)
 {
     int code = e.GetKeyCode();
     bool plain = !e.HasAnyModifiers();
-    // Each handled key acts and returns; unhandled keys fall through
-    // to Skip() so native list navigation (arrows, Home/End) still works.
     switch (code) {
     case 'J': if (plain) { move_selection(+1); return; } break;
     case 'K': if (plain) { move_selection(-1); return; } break;
@@ -482,10 +546,8 @@ void MainFrame::action_download()
         strip_unread(e, app_);
     }
     list_->refresh_items();
-    // Kick the download thread so the newly-queued item starts if idle.
     download_tick(app_);
-    if (downloads_frame_ && downloads_frame_->IsShown())
-        downloads_frame_->refresh();
+    if (pane_shown("downloads") && downloads_) downloads_->refresh();
     if (sel.size() == 1) advance_from(sel[0]);
     update_status();
 }

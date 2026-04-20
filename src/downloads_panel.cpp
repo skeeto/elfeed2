@@ -1,25 +1,23 @@
-#include "downloads_frame.hpp"
+#include "downloads_panel.hpp"
 
 #include <wx/button.h>
 #include <wx/listctrl.h>
 #include <wx/sizer.h>
 
-DownloadsFrame::DownloadsFrame(wxWindow *parent, Elfeed *app)
-    : wxFrame(parent, wxID_ANY, "Downloads", wxDefaultPosition,
-              parent->FromDIP(wxSize(700, 360)))
+DownloadsPanel::DownloadsPanel(wxWindow *parent, Elfeed *app)
+    : wxPanel(parent, wxID_ANY)
     , app_(app)
 {
-    auto *panel = new wxPanel(this);
     auto *vsz = new wxBoxSizer(wxVERTICAL);
 
     auto *hsz = new wxBoxSizer(wxHORIZONTAL);
-    btn_pause_  = new wxButton(panel, wxID_ANY, "Pause/Resume");
-    btn_remove_ = new wxButton(panel, wxID_ANY, "Remove");
+    btn_pause_  = new wxButton(this, wxID_ANY, "Pause/Resume");
+    btn_remove_ = new wxButton(this, wxID_ANY, "Remove");
     hsz->Add(btn_pause_,  0, wxALL, FromDIP(4));
     hsz->Add(btn_remove_, 0, wxALL, FromDIP(4));
     vsz->Add(hsz, 0, wxEXPAND);
 
-    list_ = new wxListCtrl(panel, wxID_ANY, wxDefaultPosition, wxDefaultSize,
+    list_ = new wxListCtrl(this, wxID_ANY, wxDefaultPosition, wxDefaultSize,
                            wxLC_REPORT);
     list_->AppendColumn("%",     wxLIST_FORMAT_LEFT, FromDIP(80));
     list_->AppendColumn("Size",  wxLIST_FORMAT_LEFT, FromDIP(80));
@@ -27,20 +25,15 @@ DownloadsFrame::DownloadsFrame(wxWindow *parent, Elfeed *app)
     list_->AppendColumn("Fails", wxLIST_FORMAT_LEFT, FromDIP(50));
     vsz->Add(list_, 1, wxEXPAND);
 
-    panel->SetSizer(vsz);
+    SetSizer(vsz);
 
-    auto *outer = new wxBoxSizer(wxVERTICAL);
-    outer->Add(panel, 1, wxEXPAND);
-    SetSizer(outer);
-
-    btn_pause_->Bind(wxEVT_BUTTON,  &DownloadsFrame::on_pause,  this);
-    btn_remove_->Bind(wxEVT_BUTTON, &DownloadsFrame::on_remove, this);
-    Bind(wxEVT_CLOSE_WINDOW, &DownloadsFrame::on_close, this);
+    btn_pause_->Bind(wxEVT_BUTTON,  &DownloadsPanel::on_pause,  this);
+    btn_remove_->Bind(wxEVT_BUTTON, &DownloadsPanel::on_remove, this);
 
     refresh();
 }
 
-void DownloadsFrame::refresh()
+void DownloadsPanel::refresh()
 {
     snapshot_.clear();
     int active_id = app_->download_active_id;
@@ -59,8 +52,6 @@ void DownloadsFrame::refresh()
         }
     }
 
-    // wxListCtrl in non-virtual report mode: clear and repopulate. For
-    // typical download counts (<20) this is cheap.
     list_->DeleteAllItems();
     for (size_t i = 0; i < snapshot_.size(); i++) {
         const Row &r = snapshot_[i];
@@ -81,7 +72,7 @@ void DownloadsFrame::refresh()
     }
 }
 
-void DownloadsFrame::on_pause(wxCommandEvent &)
+void DownloadsPanel::on_pause(wxCommandEvent &)
 {
     long idx = -1;
     while ((idx = list_->GetNextItem(idx, wxLIST_NEXT_ALL,
@@ -92,7 +83,7 @@ void DownloadsFrame::on_pause(wxCommandEvent &)
     refresh();
 }
 
-void DownloadsFrame::on_remove(wxCommandEvent &)
+void DownloadsPanel::on_remove(wxCommandEvent &)
 {
     // Collect selected ids first; download_remove mutates the vector.
     std::vector<int> ids;
@@ -103,15 +94,4 @@ void DownloadsFrame::on_remove(wxCommandEvent &)
     }
     for (int id : ids) download_remove(app_, id);
     refresh();
-}
-
-void DownloadsFrame::on_close(wxCloseEvent &e)
-{
-    if (e.CanVeto()) {
-        Hide();
-        app_->show_downloads = false;
-        e.Veto();
-    } else {
-        Destroy();
-    }
 }
