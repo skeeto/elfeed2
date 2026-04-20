@@ -133,7 +133,7 @@ void fetch_stop(Elfeed *app)
     app->fetch_workers.clear();
 }
 
-void fetch_process_results(Elfeed *app)
+bool fetch_process_results(Elfeed *app)
 {
     std::vector<FetchResult> results;
     {
@@ -148,6 +148,8 @@ void fetch_process_results(Elfeed *app)
             if (t.joinable()) t.join();
         app->fetch_workers.clear();
     }
+
+    if (results.empty()) return false;
 
     for (auto &r : results) {
         Feed *feed = nullptr;
@@ -211,4 +213,5 @@ void fetch_process_results(Elfeed *app)
 
         db_add_entries(app, parsed.entries);
     }
+    return true;
 }

@@ -209,7 +209,9 @@ void download_stop(Elfeed *app);
 // Fetching
 void fetch_all(Elfeed *app);
 void fetch_stop(Elfeed *app);
-void fetch_process_results(Elfeed *app);
+// Drain the worker->UI inbox. Returns true if at least one result was
+// processed (so the caller knows whether to requery the entry list).
+bool fetch_process_results(Elfeed *app);
 
 // Logging
 void elfeed_log(Elfeed *app, LogKind kind, const char *fmt, ...)

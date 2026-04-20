@@ -24,12 +24,16 @@ private:
     void build_menus();
     void build_widgets();
     void bind_events();
-    void install_accelerators();
 
     // ---- Data plumbing ----
     void requery();          // re-run db_query_entries and refresh list
     void update_status();    // update status bar text
     void update_menu_checks();
+
+    // ---- Selection helpers ----
+    void move_selection(int delta); // single-select navigation (j/k)
+    void go_to(long row);           // absolute jump (g/G)
+    void advance_from(long row);    // after u/r/d: move down one
 
     // ---- Events ----
     void on_wake(wxThreadEvent &);
@@ -44,7 +48,6 @@ private:
     void on_list_activated(wxListEvent &);   // double-click / Enter
     void on_list_key(wxKeyEvent &);
     void on_filter_key(wxKeyEvent &);
-    void on_download_tick(wxTimerEvent &);
 
     // ---- Actions on selection ----
     void action_mark_read();
@@ -60,7 +63,6 @@ private:
     EntryDetail *detail_ = nullptr;
     LogFrame *log_frame_ = nullptr;
     DownloadsFrame *downloads_frame_ = nullptr;
-    wxTimer *download_timer_ = nullptr;
 
     int menu_log_id_ = 0;
     int menu_downloads_id_ = 0;

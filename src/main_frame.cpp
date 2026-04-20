@@ -6,7 +6,6 @@
 #include "events.hpp"
 #include "log_frame.hpp"
 
-#include <wx/accel.h>
 #include <wx/clipbrd.h>
 #include <wx/menu.h>
 #include <wx/msgdlg.h>
@@ -14,7 +13,6 @@
 #include <wx/sizer.h>
 #include <wx/splitter.h>
 #include <wx/statusbr.h>
-#include <wx/timer.h>
 #include <wx/utils.h>
 
 #include <algorithm>
@@ -23,13 +21,6 @@ enum {
     ID_Fetch = wxID_HIGHEST + 1,
     ID_ToggleLog,
     ID_ToggleDownloads,
-    ID_MarkRead,
-    ID_MarkUnread,
-    ID_OpenBrowser,
-    ID_CopyLink,
-    ID_Download,
-    ID_FocusFilter,
-    ID_DownloadTimer,
 };
 
 MainFrame::MainFrame(Elfeed *app)
@@ -45,7 +36,6 @@ MainFrame::MainFrame(Elfeed *app)
     build_menus();
     build_widgets();
     bind_events();
-    install_accelerators();
 
     CreateStatusBar(1);
 
@@ -64,20 +54,10 @@ MainFrame::MainFrame(Elfeed *app)
         downloads_frame_ = new DownloadsFrame(this, app_);
         downloads_frame_->Show();
     }
-
-    // Poll the download queue so download_tick() runs (starts the next
-    // queued download once the active one exits). The actual download
-    // progress is pushed via app_wake_ui from the download worker.
-    download_timer_ = new wxTimer(this, ID_DownloadTimer);
-    download_timer_->Start(250);
 }
 
 MainFrame::~MainFrame()
 {
-    if (download_timer_) {
-        download_timer_->Stop();
-        delete download_timer_;
-    }
     app_->event_sink = nullptr;
 }
 
@@ -148,20 +128,6 @@ void MainFrame::bind_events()
     Bind(wxEVT_MENU, &MainFrame::on_quit, this, wxID_EXIT);
     Bind(wxEVT_CLOSE_WINDOW, &MainFrame::on_close, this);
 
-    Bind(wxEVT_MENU, [this](wxCommandEvent &) { action_mark_read(); },
-         ID_MarkRead);
-    Bind(wxEVT_MENU, [this](wxCommandEvent &) { action_mark_unread(); },
-         ID_MarkUnread);
-    Bind(wxEVT_MENU, [this](wxCommandEvent &) { action_open_in_browser(); },
-         ID_OpenBrowser);
-    Bind(wxEVT_MENU, [this](wxCommandEvent &) { action_copy_link(); },
-         ID_CopyLink);
-    Bind(wxEVT_MENU, [this](wxCommandEvent &) { action_download(); },
-         ID_Download);
-    Bind(wxEVT_MENU,
-         [this](wxCommandEvent &) { filter_->SetFocus(); filter_->SelectAll(); },
-         ID_FocusFilter);
-
     filter_->Bind(wxEVT_TEXT, &MainFrame::on_filter_text, this);
     filter_->Bind(wxEVT_SEARCH_CANCEL, [this](wxCommandEvent &) {
         filter_->Clear();
@@ -173,27 +139,6 @@ void MainFrame::bind_events()
     list_->Bind(wxEVT_LIST_ITEM_ACTIVATED,
                 &MainFrame::on_list_activated, this);
     list_->Bind(wxEVT_CHAR_HOOK, &MainFrame::on_list_key, this);
-
-    Bind(wxEVT_TIMER, &MainFrame::on_download_tick, this, ID_DownloadTimer);
-}
-
-void MainFrame::install_accelerators()
-{
-    // Menu shortcuts for vi-like keys. wxEVT_CHAR_HOOK on the list
-    // handles 'j'/'k'/etc. that collide with incremental list search,
-    // but we still wire them into the menu so they show in menus.
-    wxAcceleratorEntry entries[] = {
-        { wxACCEL_NORMAL, (int)'U', ID_MarkUnread },
-        { wxACCEL_NORMAL, (int)'R', ID_MarkRead },
-        { wxACCEL_NORMAL, (int)'B', ID_OpenBrowser },
-        { wxACCEL_NORMAL, (int)'Y', ID_CopyLink },
-        { wxACCEL_NORMAL, (int)'D', ID_Download },
-        { wxACCEL_NORMAL, (int)'F', ID_Fetch },
-        { wxACCEL_NORMAL, (int)'S', ID_FocusFilter },
-        { wxACCEL_NORMAL, (int)'/', ID_FocusFilter },
-    };
-    SetAcceleratorTable(
-        wxAcceleratorTable(sizeof(entries)/sizeof(entries[0]), entries));
 }
 
 // ---- Data plumbing -------------------------------------------------
@@ -273,12 +218,11 @@ void MainFrame::update_menu_checks()
 
 void MainFrame::on_wake(wxThreadEvent &)
 {
-    fetch_process_results(app_);
-    // Some results may have arrived — requery keeps the list current.
-    // Only do a full requery if fetch_inbox had meaningful content;
-    // cheap heuristic: always requery (db_query_entries is fast).
-    requery();
+    // Only requery the DB if fetch actually committed new entries.
+    // Most wakes are just log lines or download progress updates.
+    if (fetch_process_results(app_)) requery();
     update_status();
+    download_tick(app_);  // start the next queued download if idle
     if (log_frame_ && log_frame_->IsShown()) log_frame_->refresh();
     if (downloads_frame_ && downloads_frame_->IsShown())
         downloads_frame_->refresh();
@@ -361,52 +305,33 @@ void MainFrame::on_list_activated(wxListEvent &)
 void MainFrame::on_list_key(wxKeyEvent &e)
 {
     int code = e.GetKeyCode();
-    // Only handle unmodified presses; otherwise let accelerators /
-    // menus handle it.
-    if (e.HasAnyModifiers()) { e.Skip(); return; }
-
+    bool plain = !e.HasAnyModifiers();
+    // Each handled key acts and returns; unhandled keys fall through
+    // to Skip() so native list navigation (arrows, Home/End) still works.
     switch (code) {
-    case 'J': {
-        long p = list_->primary();
-        long n = (long)app_->entries.size();
-        if (p + 1 < n) {
-            list_->SetItemState(p, 0,
-                                wxLIST_STATE_SELECTED | wxLIST_STATE_FOCUSED);
-            list_->SetItemState(p + 1,
-                                wxLIST_STATE_SELECTED | wxLIST_STATE_FOCUSED,
-                                wxLIST_STATE_SELECTED | wxLIST_STATE_FOCUSED);
-            list_->EnsureVisible(p + 1);
-        }
-        return;
-    }
-    case 'K': {
-        long p = list_->primary();
-        if (p > 0) {
-            list_->SetItemState(p, 0,
-                                wxLIST_STATE_SELECTED | wxLIST_STATE_FOCUSED);
-            list_->SetItemState(p - 1,
-                                wxLIST_STATE_SELECTED | wxLIST_STATE_FOCUSED,
-                                wxLIST_STATE_SELECTED | wxLIST_STATE_FOCUSED);
-            list_->EnsureVisible(p - 1);
-        }
-        return;
-    }
+    case 'J': if (plain) { move_selection(+1); return; } break;
+    case 'K': if (plain) { move_selection(-1); return; } break;
     case 'G':
-        if (e.ShiftDown()) {
-            long n = (long)app_->entries.size();
-            if (n > 0) {
-                list_->SetItemState(n - 1,
-                                    wxLIST_STATE_SELECTED | wxLIST_STATE_FOCUSED,
-                                    wxLIST_STATE_SELECTED | wxLIST_STATE_FOCUSED);
-                list_->EnsureVisible(n - 1);
-            }
-        } else {
-            list_->SetItemState(0,
-                                wxLIST_STATE_SELECTED | wxLIST_STATE_FOCUSED,
-                                wxLIST_STATE_SELECTED | wxLIST_STATE_FOCUSED);
-            list_->EnsureVisible(0);
-        }
+        if (e.ShiftDown())
+            go_to((long)app_->entries.size() - 1);
+        else if (plain)
+            go_to(0);
+        else break;
         return;
+    case 'U': if (plain) { action_mark_unread();      return; } break;
+    case 'R': if (plain) { action_mark_read();        return; } break;
+    case 'B': if (plain) { action_open_in_browser();  return; } break;
+    case 'Y': if (plain) { action_copy_link();        return; } break;
+    case 'D': if (plain) { action_download();         return; } break;
+    case 'F': if (plain) { fetch_all(app_); update_status(); return; } break;
+    case 'S':
+    case '/':
+        if (plain) {
+            filter_->SetFocus();
+            filter_->SelectAll();
+            return;
+        }
+        break;
     }
     e.Skip();
 }
@@ -421,11 +346,44 @@ void MainFrame::on_filter_key(wxKeyEvent &e)
     e.Skip();
 }
 
-void MainFrame::on_download_tick(wxTimerEvent &)
+// ---- Selection helpers ---------------------------------------------
+
+static constexpr long kSelectAndFocus =
+    wxLIST_STATE_SELECTED | wxLIST_STATE_FOCUSED;
+
+void MainFrame::move_selection(int delta)
 {
-    download_tick(app_);
-    if (downloads_frame_ && downloads_frame_->IsShown())
-        downloads_frame_->refresh();
+    long p = list_->primary();
+    long n = (long)app_->entries.size();
+    if (p < 0) return;
+    long target = p + delta;
+    if (target < 0 || target >= n) return;
+    list_->SetItemState(p, 0, kSelectAndFocus);
+    list_->SetItemState(target, kSelectAndFocus, kSelectAndFocus);
+    list_->EnsureVisible(target);
+}
+
+void MainFrame::go_to(long row)
+{
+    long n = (long)app_->entries.size();
+    if (row < 0 || row >= n) return;
+    long p = list_->primary();
+    if (p >= 0 && p != row)
+        list_->SetItemState(p, 0, kSelectAndFocus);
+    list_->SetItemState(row, kSelectAndFocus, kSelectAndFocus);
+    list_->EnsureVisible(row);
+}
+
+void MainFrame::advance_from(long row)
+{
+    long n = (long)app_->entries.size();
+    long next = row + 1;
+    if (next >= n) next = n - 1;
+    if (next < 0) return;
+    if (next != row) list_->SetItemState(row, 0, kSelectAndFocus);
+    list_->SetItemState(next, kSelectAndFocus, kSelectAndFocus);
+    list_->EnsureVisible(next);
+    detail_->show_entry(&app_->entries[(size_t)next]);
 }
 
 // ---- Actions -------------------------------------------------------
@@ -457,21 +415,7 @@ void MainFrame::action_mark_read()
         strip_unread(app_->entries[(size_t)i], app_);
     }
     list_->refresh_items();
-    // Advance if single-selection
-    if (sel.size() == 1) {
-        long next = sel[0] + 1;
-        long n = (long)app_->entries.size();
-        if (next >= n) next = n - 1;
-        if (next >= 0) {
-            list_->SetItemState(sel[0], 0,
-                                wxLIST_STATE_SELECTED | wxLIST_STATE_FOCUSED);
-            list_->SetItemState(next,
-                                wxLIST_STATE_SELECTED | wxLIST_STATE_FOCUSED,
-                                wxLIST_STATE_SELECTED | wxLIST_STATE_FOCUSED);
-            list_->EnsureVisible(next);
-            detail_->show_entry(&app_->entries[(size_t)next]);
-        }
-    }
+    if (sel.size() == 1) advance_from(sel[0]);
     update_status();
 }
 
@@ -484,20 +428,7 @@ void MainFrame::action_mark_unread()
         add_unread(app_->entries[(size_t)i], app_);
     }
     list_->refresh_items();
-    if (sel.size() == 1) {
-        long next = sel[0] + 1;
-        long n = (long)app_->entries.size();
-        if (next >= n) next = n - 1;
-        if (next >= 0) {
-            list_->SetItemState(sel[0], 0,
-                                wxLIST_STATE_SELECTED | wxLIST_STATE_FOCUSED);
-            list_->SetItemState(next,
-                                wxLIST_STATE_SELECTED | wxLIST_STATE_FOCUSED,
-                                wxLIST_STATE_SELECTED | wxLIST_STATE_FOCUSED);
-            list_->EnsureVisible(next);
-            detail_->show_entry(&app_->entries[(size_t)next]);
-        }
-    }
+    if (sel.size() == 1) advance_from(sel[0]);
     update_status();
 }
 
@@ -546,22 +477,10 @@ void MainFrame::action_download()
         strip_unread(e, app_);
     }
     list_->refresh_items();
+    // Kick the download thread so the newly-queued item starts if idle.
+    download_tick(app_);
     if (downloads_frame_ && downloads_frame_->IsShown())
         downloads_frame_->refresh();
-    // Advance like mark_read
-    if (sel.size() == 1) {
-        long next = sel[0] + 1;
-        long n = (long)app_->entries.size();
-        if (next >= n) next = n - 1;
-        if (next >= 0) {
-            list_->SetItemState(sel[0], 0,
-                                wxLIST_STATE_SELECTED | wxLIST_STATE_FOCUSED);
-            list_->SetItemState(next,
-                                wxLIST_STATE_SELECTED | wxLIST_STATE_FOCUSED,
-                                wxLIST_STATE_SELECTED | wxLIST_STATE_FOCUSED);
-            list_->EnsureVisible(next);
-            detail_->show_entry(&app_->entries[(size_t)next]);
-        }
-    }
+    if (sel.size() == 1) advance_from(sel[0]);
     update_status();
 }
