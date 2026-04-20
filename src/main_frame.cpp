@@ -54,6 +54,11 @@ MainFrame::MainFrame(Elfeed *app)
         downloads_frame_ = new DownloadsFrame(this, app_);
         downloads_frame_->Show();
     }
+
+    // Focus the entry list so vi-style keys work immediately after
+    // launch. SetFocus() before Show() is a no-op on some platforms,
+    // so defer until the first idle tick.
+    CallAfter([this] { list_->SetFocus(); });
 }
 
 MainFrame::~MainFrame()
@@ -328,7 +333,7 @@ void MainFrame::on_list_key(wxKeyEvent &e)
     case '/':
         if (plain) {
             filter_->SetFocus();
-            filter_->SelectAll();
+            filter_->SetInsertionPointEnd();
             return;
         }
         break;
