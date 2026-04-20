@@ -1,4 +1,5 @@
 #include "elfeed.hpp"
+#include "util.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -237,57 +238,6 @@ static void xml_unparse(pugi::xml_node node, std::string &out)
 }
 
 // --- Date parsing ---
-
-// Parse simple ISO 8601: YYYY-MM[-DD][THH:MM[:SS]]
-// Also handles YYYYMMDD format
-static double parse_iso8601(const std::string &s)
-{
-    if (s.empty()) return 0;
-    struct tm t = {};
-    // Try various ISO formats
-    if (sscanf(s.c_str(), "%4d-%2d-%2dT%2d:%2d:%2d",
-               &t.tm_year, &t.tm_mon, &t.tm_mday,
-               &t.tm_hour, &t.tm_min, &t.tm_sec) >= 3) {
-        // ok
-    } else if (sscanf(s.c_str(), "%4d%2d%2dT%2d%2d%2d",
-                       &t.tm_year, &t.tm_mon, &t.tm_mday,
-                       &t.tm_hour, &t.tm_min, &t.tm_sec) >= 3) {
-        // ok
-    } else if (sscanf(s.c_str(), "%4d-%2d-%2d %2d:%2d:%2d",
-                       &t.tm_year, &t.tm_mon, &t.tm_mday,
-                       &t.tm_hour, &t.tm_min, &t.tm_sec) >= 3) {
-        // ok
-    } else if (sscanf(s.c_str(), "%4d-%2d",
-                       &t.tm_year, &t.tm_mon) >= 2) {
-        t.tm_mday = 1;
-    } else {
-        return 0;
-    }
-    t.tm_year -= 1900;
-    t.tm_mon -= 1;
-    if (t.tm_mday == 0) t.tm_mday = 1;
-    return (double)timegm(&t);
-}
-
-// Parse RFC 822 / RFC 2822 date (used by RSS)
-// Example: "Mon, 02 Jan 2006 15:04:05 GMT"
-static double parse_rfc822(const std::string &s)
-{
-    if (s.empty()) return 0;
-    struct tm t = {};
-    // Try with day-of-week
-    const char *p = strptime(s.c_str(), "%a, %d %b %Y %H:%M:%S", &t);
-    if (!p) {
-        // Try without day-of-week
-        p = strptime(s.c_str(), "%d %b %Y %H:%M:%S", &t);
-    }
-    if (!p) {
-        // Try with just date
-        p = strptime(s.c_str(), "%a, %d %b %Y", &t);
-    }
-    if (!p) return 0;
-    return (double)timegm(&t);
-}
 
 // Parse any date string, return epoch seconds or 0
 static double parse_date(const std::string &s)

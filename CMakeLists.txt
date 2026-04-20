@@ -140,6 +140,7 @@ set(elfeed_sources
   src/config.cpp
   src/fetch.cpp
   src/download.cpp
+  src/util.cpp
 )
 if(WIN32)
   list(APPEND elfeed_sources src/http_win.cpp)

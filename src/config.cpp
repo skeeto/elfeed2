@@ -1,8 +1,10 @@
 #include "elfeed.hpp"
+#include "util.hpp"
 
-#include <cstdio>
+#include <wx/textfile.h>
+
+#include <cstdlib>
 #include <cstring>
-#include <sys/stat.h>
 
 static std::string trim(const std::string &s)
 {
@@ -14,39 +16,29 @@ static std::string trim(const std::string &s)
 
 void config_load(Elfeed *app)
 {
-    std::string dir = xdg_config_home() + "/elfeed2";
-#ifdef _WIN32
-    _mkdir(dir.c_str());
-#else
-    mkdir(dir.c_str(), 0755);
-#endif
+    std::string dir = user_config_dir();
+    make_directory(dir);
     app->config_path = dir + "/config";
 
-    FILE *f = fopen(app->config_path.c_str(), "r");
-    if (!f) return;
+    // wxTextFile opens the file via wxFileName (UTF-8-safe on Windows),
+    // auto-detects line endings (LF / CR / CRLF), and strips BOMs.
+    wxTextFile tf;
+    if (!tf.Open(wxString::FromUTF8(app->config_path))) return;
 
-    char line[4096];
-    while (fgets(line, sizeof(line), f)) {
-        // Strip trailing newline
-        size_t len = strlen(line);
-        while (len > 0 && (line[len-1] == '\n' || line[len-1] == '\r'))
-            line[--len] = '\0';
-
-        std::string s = trim(line);
+    for (size_t i = 0; i < tf.GetLineCount(); i++) {
+        std::string s = trim(tf[i].utf8_string());
         if (s.empty() || s[0] == '#') continue;
 
-        // Check for key=value
+        // key=value settings
         size_t eq = s.find('=');
         if (eq != std::string::npos && s.find("://") == std::string::npos) {
             std::string key = trim(s.substr(0, eq));
             std::string val = trim(s.substr(eq + 1));
 
             if (key == "download-dir") {
-                // Expand ~ at start
-                if (!val.empty() && val[0] == '~') {
-                    const char *home = getenv("HOME");
-                    if (home) val = home + val.substr(1);
-                }
+                // Expand leading ~ to the user's home directory.
+                if (!val.empty() && val[0] == '~')
+                    val = user_home_dir() + val.substr(1);
                 app->download_dir = val;
             } else if (key == "ytdlp-program") {
                 app->ytdlp_program = val;
@@ -59,18 +51,16 @@ void config_load(Elfeed *app)
             } else if (key == "fetch-timeout") {
                 app->fetch_timeout = atoi(val.c_str());
             }
-            // bookmark = name = expression (skip for now)
             continue;
         }
 
-        // Otherwise it's a feed URL, possibly with autotags
-        // Format: URL [tag1 tag2 ...]
+        // Otherwise it's a feed URL, possibly with autotags:
+        //   URL [tag1 tag2 ...]
         Feed feed;
         size_t space = s.find(' ');
         if (space != std::string::npos) {
             feed.url = s.substr(0, space);
             std::string rest = s.substr(space + 1);
-            // Split on whitespace for tags
             size_t pos = 0;
             while (pos < rest.size()) {
                 size_t next = rest.find(' ', pos);
@@ -86,6 +76,4 @@ void config_load(Elfeed *app)
         if (!feed.url.empty())
             app->feeds.push_back(std::move(feed));
     }
-
-    fclose(f);
 }

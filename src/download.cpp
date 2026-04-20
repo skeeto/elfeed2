@@ -1,20 +1,18 @@
+// Download manager built on wxProcess. All state is UI-thread-local:
+// wxExecute() is asynchronous, its child-termination events are
+// delivered on the UI thread via wxProcess::OnTerminate, and a wxTimer
+// drains the child's stdout at 200 ms intervals so progress updates
+// reach the UI promptly.
+
 #include "elfeed.hpp"
 
+#include <wx/process.h>
+#include <wx/stream.h>
+#include <wx/timer.h>
+#include <wx/utils.h>
+
 #include <algorithm>
-#include <cstdio>
-#include <cstring>
 #include <regex>
-
-#ifndef _WIN32
-#include <signal.h>
-#include <sys/wait.h>
-#include <unistd.h>
-#endif
-
-static void wake_main_thread(Elfeed *app)
-{
-    app_wake_ui(app);
-}
 
 // Find the next item to run: highest (priority - failures), not paused,
 // not over max failures (5).
@@ -34,144 +32,111 @@ static DownloadItem *pick_next(std::vector<DownloadItem> &items)
     return best;
 }
 
-#ifndef _WIN32
-static void download_thread_func(Elfeed *app, DownloadItem item)
-{
-    // Build command
-    std::vector<std::string> args;
-    if (item.is_video) {
-        args.push_back(app->ytdlp_program);
-        args.push_back("--newline");
-        for (auto &a : app->ytdlp_args)
-            args.push_back(a);
-        if (item.slow)
-            args.push_back("--rate-limit=2M");
-        if (!item.destination.empty()) {
-            args.push_back("--output");
-            args.push_back(item.destination);
-        }
-        args.push_back("--");
-        args.push_back(item.url);
-    } else {
-        args.push_back("curl");
-        args.push_back("-fSL");
-        if (!item.destination.empty()) {
-            args.push_back("-o");
-            args.push_back(item.destination);
-        } else {
-            args.push_back("-O");
-        }
-        args.push_back("--");
-        args.push_back(item.url);
+namespace {
+
+class DownloadProcess : public wxProcess {
+public:
+    DownloadProcess(Elfeed *app, int item_id)
+        : wxProcess(wxPROCESS_REDIRECT)
+        , app_(app)
+        , item_id_(item_id)
+        , timer_(this)
+    {
+        Bind(wxEVT_TIMER, &DownloadProcess::on_timer, this);
     }
 
-    // Create pipe for stdout
-    int pipefd[2];
-    if (pipe(pipefd) < 0) {
-        std::lock_guard lock(app->download_mutex);
-        for (auto &d : app->downloads) {
-            if (d.id == item.id) {
-                d.failures++;
-                d.log.push_back("Failed to create pipe");
-                break;
-            }
+    // Called once right after a successful wxExecute so we can start
+    // polling the child's stdout stream.
+    void begin(long pid)
+    {
+        pid_ = pid;
+        timer_.Start(200);
+    }
+
+    // Send SIGTERM to the child. If `paused` is true, OnTerminate will
+    // treat the non-zero exit as an intentional pause rather than a
+    // failure.
+    void kill(bool paused)
+    {
+        paused_ = paused;
+        if (pid_ > 0) wxProcess::Kill(pid_, wxSIGTERM);
+    }
+
+    // wxProcess fires this on the UI thread when the child exits.
+    // wxProcess self-deletes after this returns.
+    void OnTerminate(int /*pid*/, int status) override
+    {
+        timer_.Stop();
+        drain();
+        finish(status);
+    }
+
+private:
+    void on_timer(wxTimerEvent &) { drain(); }
+
+    // Read whatever's available from the child's stdout (and stderr),
+    // split into complete lines, and dispatch each line.
+    void drain()
+    {
+        drain_stream(GetInputStream(), true);
+        drain_stream(GetErrorStream(), false);
+    }
+
+    void drain_stream(wxInputStream *in, bool parse)
+    {
+        if (!in) return;
+        while (in->CanRead()) {
+            char buf[4096];
+            in->Read(buf, sizeof(buf));
+            size_t n = in->LastRead();
+            if (n == 0) break;
+            line_buf_.append(buf, n);
+            flush_lines(parse);
         }
-        return;
     }
 
-    pid_t pid = fork();
-    if (pid == 0) {
-        // Child
-        close(pipefd[0]);
-        dup2(pipefd[1], STDOUT_FILENO);
-        dup2(pipefd[1], STDERR_FILENO);
-        close(pipefd[1]);
+    void flush_lines(bool parse)
+    {
+        static const std::regex progress_re("([0-9.]+%) +of +([^ ]+)");
+        static const std::regex dest_re("Destination: (.+)");
 
-        if (!item.directory.empty())
-            chdir(item.directory.c_str());
-
-        // Build argv
-        std::vector<const char *> argv;
-        for (auto &a : args)
-            argv.push_back(a.c_str());
-        argv.push_back(nullptr);
-        execvp(argv[0], const_cast<char *const *>(argv.data()));
-        _exit(127);
-    }
-
-    close(pipefd[1]);
-    app->download_child_pid = (int)pid;
-
-    if (pid < 0) {
-        close(pipefd[0]);
-        std::lock_guard lock(app->download_mutex);
-        for (auto &d : app->downloads) {
-            if (d.id == item.id) {
-                d.failures++;
-                d.log.push_back("Failed to fork");
-                break;
-            }
-        }
-        return;
-    }
-
-    // Read output and parse progress
-    std::regex progress_re("([0-9.]+%) +of +([^ ]+)");
-    std::regex dest_re("Destination: (.+)");
-    char buf[4096];
-    std::string line_buf;
-
-    while (app->download_running.load()) {
-        ssize_t n = read(pipefd[0], buf, sizeof(buf));
-        if (n <= 0) break;
-
-        line_buf.append(buf, (size_t)n);
-
-        // Process complete lines
         size_t pos;
-        while ((pos = line_buf.find('\n')) != std::string::npos) {
-            std::string line = line_buf.substr(0, pos);
-            line_buf.erase(0, pos + 1);
+        while ((pos = line_buf_.find('\n')) != std::string::npos) {
+            std::string line = line_buf_.substr(0, pos);
+            line_buf_.erase(0, pos + 1);
+            if (!line.empty() && line.back() == '\r') line.pop_back();
 
             std::smatch m;
-            std::lock_guard lock(app->download_mutex);
-            for (auto &d : app->downloads) {
-                if (d.id != item.id) continue;
+            for (auto &d : app_->downloads) {
+                if (d.id != item_id_) continue;
                 d.log.push_back(line);
-
-                if (std::regex_search(line, m, progress_re)) {
-                    d.progress = m[1].str();
-                    d.total = m[2].str();
-                }
-                if (std::regex_search(line, m, dest_re)) {
-                    d.destination = m[1].str();
+                if (parse) {
+                    if (std::regex_search(line, m, progress_re)) {
+                        d.progress = m[1].str();
+                        d.total = m[2].str();
+                    }
+                    if (std::regex_search(line, m, dest_re)) {
+                        d.destination = m[1].str();
+                    }
                 }
                 break;
             }
-            wake_main_thread(app);
         }
+        app_wake_ui(app_);
     }
-    close(pipefd[0]);
-    app->download_child_pid = 0;
 
-    // Wait for child
-    int wstatus;
-    waitpid(pid, &wstatus, 0);
-    bool success = WIFEXITED(wstatus) && WEXITSTATUS(wstatus) == 0;
-
+    void finish(int status)
     {
-        std::lock_guard lock(app->download_mutex);
+        bool success = (status == 0);
         if (success) {
-            // Remove completed item
-            app->downloads.erase(
-                std::remove_if(app->downloads.begin(), app->downloads.end(),
-                               [&](auto &d) { return d.id == item.id; }),
-                app->downloads.end());
+            app_->downloads.erase(
+                std::remove_if(app_->downloads.begin(), app_->downloads.end(),
+                               [this](auto &d) { return d.id == item_id_; }),
+                app_->downloads.end());
         } else {
-            for (auto &d : app->downloads) {
-                if (d.id != item.id) continue;
-                // Don't count pause as a failure
-                if (!d.paused) {
+            for (auto &d : app_->downloads) {
+                if (d.id != item_id_) continue;
+                if (!paused_) {
                     d.failures++;
                     d.log.push_back("Process exited with error");
                 }
@@ -179,12 +144,20 @@ static void download_thread_func(Elfeed *app, DownloadItem item)
                 break;
             }
         }
-        app->download_active_id = 0;
+        app_->download_active_id = 0;
+        app_->download_process = nullptr;
+        app_wake_ui(app_);
     }
 
-    wake_main_thread(app);
-}
-#endif
+    Elfeed *app_;
+    int item_id_;
+    wxTimer timer_;
+    std::string line_buf_;
+    long pid_ = 0;
+    bool paused_ = false;
+};
+
+} // anonymous namespace
 
 void download_enqueue(Elfeed *app, const std::string &url,
                       const std::string &title, bool is_video)
@@ -195,43 +168,82 @@ void download_enqueue(Elfeed *app, const std::string &url,
     item.title = title;
     item.is_video = is_video;
     item.directory = app->download_dir;
-
-    std::lock_guard lock(app->download_mutex);
     app->downloads.push_back(std::move(item));
 }
 
 void download_tick(Elfeed *app)
 {
-#ifndef _WIN32
-    // If no active download, start the next one
     if (app->download_active_id != 0) return;
-    if (app->download_thread.joinable())
-        app->download_thread.join();
-
-    std::lock_guard lock(app->download_mutex);
     if (app->downloads.empty()) return;
 
     DownloadItem *next = pick_next(app->downloads);
     if (!next) return;
 
-    app->download_active_id = next->id;
-    app->download_running = true;
-    DownloadItem copy = *next;
+    // Build argv. argv_owned holds the backing strings; argv is a
+    // NULL-terminated array of c_str pointers into argv_owned.
+    std::vector<std::string> argv_owned;
+    if (next->is_video) {
+        argv_owned.push_back(app->ytdlp_program);
+        argv_owned.push_back("--newline");
+        for (auto &a : app->ytdlp_args) argv_owned.push_back(a);
+        if (next->slow) argv_owned.push_back("--rate-limit=2M");
+        if (!next->destination.empty()) {
+            argv_owned.push_back("--output");
+            argv_owned.push_back(next->destination);
+        }
+        argv_owned.push_back("--");
+        argv_owned.push_back(next->url);
+    } else {
+        argv_owned.push_back("curl");
+        argv_owned.push_back("-fSL");
+        if (!next->destination.empty()) {
+            argv_owned.push_back("-o");
+            argv_owned.push_back(next->destination);
+        } else {
+            argv_owned.push_back("-O");
+        }
+        argv_owned.push_back("--");
+        argv_owned.push_back(next->url);
+    }
+    std::vector<const char *> argv;
+    argv.reserve(argv_owned.size() + 1);
+    for (auto &s : argv_owned) argv.push_back(s.c_str());
+    argv.push_back(nullptr);
 
-    app->download_thread = std::thread(download_thread_func, app,
-                                        std::move(copy));
-#endif
+    auto *proc = new DownloadProcess(app, next->id);
+
+    wxExecuteEnv env;
+    if (!next->directory.empty())
+        env.cwd = wxString::FromUTF8(next->directory);
+
+    long pid = wxExecute(argv.data(),
+                         wxEXEC_ASYNC | wxEXEC_HIDE_CONSOLE |
+                         wxEXEC_MAKE_GROUP_LEADER,
+                         proc, &env);
+
+    if (pid == 0) {
+        // wxExecute failure; wxProcess must be deleted manually since
+        // no OnTerminate will fire.
+        delete proc;
+        for (auto &d : app->downloads) {
+            if (d.id != next->id) continue;
+            d.failures++;
+            d.log.push_back("Failed to start process");
+            break;
+        }
+        return;
+    }
+
+    proc->begin(pid);
+    app->download_active_id = next->id;
+    app->download_process = proc;
 }
 
 void download_remove(Elfeed *app, int id)
 {
-    // Kill the child process if removing the active download
-    if (id == app->download_active_id) {
-        int pid = app->download_child_pid.load();
-        if (pid > 0)
-            kill((pid_t)pid, SIGTERM);
+    if (id == app->download_active_id && app->download_process) {
+        static_cast<DownloadProcess *>(app->download_process)->kill(false);
     }
-    std::lock_guard lock(app->download_mutex);
     app->downloads.erase(
         std::remove_if(app->downloads.begin(), app->downloads.end(),
                        [&](auto &d) { return d.id == id; }),
@@ -240,24 +252,24 @@ void download_remove(Elfeed *app, int id)
 
 void download_pause(Elfeed *app, int id)
 {
-    std::lock_guard lock(app->download_mutex);
     for (auto &d : app->downloads) {
-        if (d.id == id) {
-            d.paused = !d.paused;
-            // Kill the child process if pausing the active download
-            if (d.paused && id == app->download_active_id) {
-                int pid = app->download_child_pid.load();
-                if (pid > 0)
-                    kill((pid_t)pid, SIGTERM);
-            }
-            break;
+        if (d.id != id) continue;
+        d.paused = !d.paused;
+        if (d.paused && id == app->download_active_id && app->download_process) {
+            static_cast<DownloadProcess *>(app->download_process)->kill(true);
         }
+        break;
     }
 }
 
 void download_stop(Elfeed *app)
 {
-    app->download_running = false;
-    if (app->download_thread.joinable())
-        app->download_thread.join();
+    // Called from elfeed_shutdown. The wx event loop is on its way out
+    // so OnTerminate may not fire; send SIGTERM and let the OS reap.
+    // yt-dlp leaves a resumable partial file behind, which is fine.
+    if (app->download_process) {
+        static_cast<DownloadProcess *>(app->download_process)->kill(false);
+        app->download_process = nullptr;
+        app->download_active_id = 0;
+    }
 }

@@ -1,12 +1,11 @@
 #include "entry_detail.hpp"
+#include "util.hpp"
 
 #include <wx/font.h>
 #include <wx/hyperlink.h>
 #include <wx/html/htmlwin.h>
 #include <wx/sizer.h>
 #include <wx/stattext.h>
-
-#include <ctime>
 
 EntryDetail::EntryDetail(wxWindow *parent, Elfeed *app)
     : wxPanel(parent, wxID_ANY)
@@ -36,16 +35,6 @@ EntryDetail::EntryDetail(wxWindow *parent, Elfeed *app)
     SetSizer(sz);
 
     show_entry(nullptr);
-}
-
-static std::string fmt_date(double epoch)
-{
-    time_t t = (time_t)epoch;
-    struct tm tm;
-    localtime_r(&t, &tm);
-    char buf[32];
-    strftime(buf, sizeof(buf), "%Y-%m-%d", &tm);
-    return buf;
 }
 
 void EntryDetail::show_entry(const Entry *e)
@@ -78,7 +67,7 @@ void EntryDetail::show_entry(const Entry *e)
         tags += t;
     }
 
-    std::string sub = feed_title + "  ·  " + fmt_date(e->date);
+    std::string sub = feed_title + "  ·  " + format_date(e->date);
     if (!authors.empty()) sub += "  ·  " + authors;
     if (!tags.empty()) sub += "  (" + tags + ")";
     subtitle_->SetLabel(wxString::FromUTF8(sub));

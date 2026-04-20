@@ -1,22 +1,11 @@
 #include "feeds_panel.hpp"
+#include "util.hpp"
 
 #include <wx/listctrl.h>
 #include <wx/sizer.h>
 
 #include <algorithm>
 #include <cctype>
-#include <ctime>
-
-static wxString fmt_date(double epoch)
-{
-    if (epoch <= 0) return wxString();
-    time_t t = (time_t)epoch;
-    struct tm tm;
-    localtime_r(&t, &tm);
-    char buf[16];
-    strftime(buf, sizeof(buf), "%Y-%m-%d", &tm);
-    return wxString::FromUTF8(buf);
-}
 
 FeedsPanel::FeedsPanel(wxWindow *parent, Elfeed *app,
                        std::function<void(const std::string &)> on_activate)
@@ -76,7 +65,8 @@ void FeedsPanel::refresh()
     for (size_t i = 0; i < rows.size(); i++) {
         long item = list_->InsertItem((long)i,
                                       wxString::FromUTF8(rows[i].title));
-        list_->SetItem(item, 1, fmt_date(rows[i].updated));
+        list_->SetItem(item, 1,
+                       wxString::FromUTF8(format_date(rows[i].updated)));
         row_urls_.push_back(std::move(rows[i].url));
     }
 }

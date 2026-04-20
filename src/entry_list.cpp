@@ -1,20 +1,10 @@
 #include "entry_list.hpp"
+#include "util.hpp"
 
 #include <wx/font.h>
 #include <wx/settings.h>
 
 #include <algorithm>
-#include <ctime>
-
-static wxString fmt_date(double epoch)
-{
-    time_t t = (time_t)epoch;
-    struct tm tm;
-    localtime_r(&t, &tm);
-    char buf[16];
-    strftime(buf, sizeof(buf), "%Y-%m-%d", &tm);
-    return wxString::FromUTF8(buf);
-}
 
 static bool has_tag(const Entry &e, const char *tag)
 {
@@ -68,7 +58,7 @@ wxString EntryList::OnGetItemText(long item, long column) const
 
     switch (column) {
     case 0:
-        return fmt_date(e.date);
+        return wxString::FromUTF8(format_date(e.date));
     case 1:
         return wxString::FromUTF8(html_strip(e.title));
     case 2: {

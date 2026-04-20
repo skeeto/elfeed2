@@ -1,11 +1,11 @@
 #include "elfeed.hpp"
+#include "util.hpp"
 
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <ctime>
 #include <regex>
-#include <sys/stat.h>
 
 #include <sqlite3.h>
 
@@ -54,53 +54,12 @@ CREATE TABLE IF NOT EXISTS ui_state (
 );
 )";
 
-// --- XDG paths ---
-
-std::string xdg_data_home()
-{
-    const char *xdg = getenv("XDG_DATA_HOME");
-    if (xdg && *xdg) return xdg;
-#ifdef _WIN32
-    const char *appdata = getenv("LOCALAPPDATA");
-    if (appdata && *appdata) return appdata;
-    return ".";
-#else
-    const char *home = getenv("HOME");
-    if (!home) return ".";
-    return std::string(home) + "/.local/share";
-#endif
-}
-
-std::string xdg_config_home()
-{
-    const char *xdg = getenv("XDG_CONFIG_HOME");
-    if (xdg && *xdg) return xdg;
-#ifdef _WIN32
-    const char *appdata = getenv("LOCALAPPDATA");
-    if (appdata && *appdata) return appdata;
-    return ".";
-#else
-    const char *home = getenv("HOME");
-    if (!home) return ".";
-    return std::string(home) + "/.config";
-#endif
-}
-
-static void mkdirs(const std::string &path)
-{
-#ifdef _WIN32
-    _mkdir(path.c_str());
-#else
-    mkdir(path.c_str(), 0755);
-#endif
-}
-
 // --- Database operations ---
 
 void db_open(Elfeed *app)
 {
-    std::string dir = xdg_data_home() + "/elfeed2";
-    mkdirs(dir);
+    std::string dir = user_data_dir();
+    make_directory(dir);
     app->db_path = dir + "/elfeed.db";
 
     int rc = sqlite3_open(app->db_path.c_str(), &app->db);

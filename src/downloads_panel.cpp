@@ -37,19 +37,17 @@ void DownloadsPanel::refresh()
 {
     snapshot_.clear();
     int active_id = app_->download_active_id;
-    {
-        std::lock_guard lock(app_->download_mutex);
-        for (auto &d : app_->downloads) {
-            Row r;
-            r.id = d.id;
-            r.paused = d.paused;
-            r.active = (d.id == active_id);
-            r.progress = d.progress;
-            r.total = d.total;
-            r.name = d.title.empty() ? d.url : d.title;
-            r.failures = d.failures;
-            snapshot_.push_back(std::move(r));
-        }
+    // Downloads live on the UI thread only; no mutex needed.
+    for (auto &d : app_->downloads) {
+        Row r;
+        r.id = d.id;
+        r.paused = d.paused;
+        r.active = (d.id == active_id);
+        r.progress = d.progress;
+        r.total = d.total;
+        r.name = d.title.empty() ? d.url : d.title;
+        r.failures = d.failures;
+        snapshot_.push_back(std::move(r));
     }
 
     list_->DeleteAllItems();

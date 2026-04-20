@@ -10,6 +10,7 @@
 
 struct sqlite3;
 class wxEvtHandler;
+class wxProcess;
 
 // --- Data model ---
 
@@ -134,14 +135,13 @@ struct Elfeed {
     std::vector<std::thread> fetch_workers;
     std::atomic<bool> fetch_running{false};
 
-    // Downloads
-    std::mutex download_mutex;
+    // Downloads (all state is UI-thread-only; no mutex needed).
+    // download_process is non-null while a child is running; wxProcess
+    // self-deletes after OnTerminate fires so we just nil the pointer.
     std::vector<DownloadItem> downloads;
     int download_next_id = 1;
     int download_active_id = 0;
-    std::atomic<int> download_child_pid{0};
-    std::thread download_thread;
-    std::atomic<bool> download_running{false};
+    wxProcess *download_process = nullptr;
 
     // Log
     std::mutex log_mutex;
@@ -219,9 +219,5 @@ void elfeed_log(Elfeed *app, LogKind kind, const char *fmt, ...)
 // Post a "UI needs update" event to the main frame. Worker-thread safe.
 // Implemented in app.cpp where wxWidgets headers are in scope.
 void app_wake_ui(Elfeed *app);
-
-// XDG paths
-std::string xdg_data_home();
-std::string xdg_config_home();
 
 #endif

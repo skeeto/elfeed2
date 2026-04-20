@@ -1,11 +1,10 @@
 #include "log_panel.hpp"
+#include "util.hpp"
 
 #include <wx/button.h>
 #include <wx/checkbox.h>
 #include <wx/listctrl.h>
 #include <wx/sizer.h>
-
-#include <ctime>
 
 // Virtual list that reads from LogPanel::snapshot_.
 class LogList : public wxListCtrl {
@@ -45,14 +44,8 @@ wxString LogList::OnGetItemText(long item, long column) const
     const LogEntry &e = owner_->snapshot_[(size_t)item];
 
     switch (column) {
-    case 0: {
-        time_t tt = (time_t)e.time;
-        struct tm tm;
-        localtime_r(&tt, &tm);
-        char buf[32];
-        strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &tm);
-        return wxString::FromUTF8(buf);
-    }
+    case 0:
+        return wxString::FromUTF8(format_datetime(e.time));
     case 1:
         return wxString::FromUTF8(kind_name(e.kind));
     case 2:
