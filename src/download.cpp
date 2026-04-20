@@ -5,8 +5,6 @@
 #include <cstring>
 #include <regex>
 
-#include <SDL3/SDL_events.h>
-
 #ifndef _WIN32
 #include <signal.h>
 #include <sys/wait.h>
@@ -15,11 +13,7 @@
 
 static void wake_main_thread(Elfeed *app)
 {
-    if (app->wake_event_type) {
-        SDL_Event event = {};
-        event.type = app->wake_event_type;
-        SDL_PushEvent(&event);
-    }
+    app_wake_ui(app);
 }
 
 // Find the next item to run: highest (priority - failures), not paused,

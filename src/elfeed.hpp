@@ -8,9 +8,8 @@
 #include <thread>
 #include <vector>
 
-struct ImFont;
 struct sqlite3;
-struct SDL_Window;
+class wxEvtHandler;
 
 // --- Data model ---
 
@@ -38,7 +37,6 @@ struct Entry {
     std::vector<Author> authors;
     std::vector<Enclosure> enclosures;
     std::vector<std::string> tags;
-    bool selected = false;
 };
 
 struct Feed {
@@ -124,24 +122,16 @@ struct Elfeed {
     int max_connections = 16;
     int fetch_timeout = 30;
 
-    // Current view
+    // Current view (populated by db_query_entries after filter changes)
     std::vector<Entry> entries;
     Filter current_filter;
-    char filter_buf[512] = {};
-    char filter_buf_backup[512] = {};
-    bool filter_dirty = true;
-    bool filter_editing = false;
-
-    // Selection
-    int cursor = 0;
-    int sel_anchor = -1;
 
     // Fetch
     std::mutex fetch_mutex;
     std::vector<FetchResult> fetch_inbox;
     std::atomic<int> fetches_active{0};
     std::atomic<int> fetches_total{0};
-    std::thread fetch_thread;
+    std::vector<std::thread> fetch_workers;
     std::atomic<bool> fetch_running{false};
 
     // Downloads
@@ -157,32 +147,22 @@ struct Elfeed {
     std::mutex log_mutex;
     std::vector<LogEntry> log;
 
-    // UI state
-    std::string ini_path;
-    SDL_Window *window = nullptr;
-    uint32_t wake_event_type = 0;
-    int win_x = -1, win_y = -1;
-    int win_w = 1280, win_h = 800;
-    bool win_maximized = false;
-    bool want_quit = false;
-    bool needs_redraw = true;
-    bool title_dirty = true;
+    // Persistent UI toggles (saved to DB)
+    bool show_log = false;
     bool show_downloads = false;
-    bool show_log = true;
     bool log_show_info = true;
     bool log_show_requests = true;
     bool log_show_success = true;
     bool log_show_errors = true;
     bool log_auto_scroll = true;
-    bool show_entry = false;
-    int show_entry_idx = -1;
-    ImFont *mono_font = nullptr;
-    float dpi_scale = 1.0f;
+
+    // Worker-thread event sink (usually the MainFrame). Workers post events
+    // here via wxQueueEvent to wake the UI thread without polling.
+    wxEvtHandler *event_sink = nullptr;
 };
 
-// Shared logic
+// Lifecycle
 void elfeed_init(Elfeed *app);
-void elfeed_frame(Elfeed *app);
 void elfeed_shutdown(Elfeed *app);
 
 // Database
@@ -234,6 +214,10 @@ void fetch_process_results(Elfeed *app);
 // Logging
 void elfeed_log(Elfeed *app, LogKind kind, const char *fmt, ...)
     __attribute__((format(printf, 3, 4)));
+
+// Post a "UI needs update" event to the main frame. Worker-thread safe.
+// Implemented in app.cpp where wxWidgets headers are in scope.
+void app_wake_ui(Elfeed *app);
 
 // XDG paths
 std::string xdg_data_home();
