@@ -143,12 +143,22 @@ set(elfeed_sources
   src/util.cpp
 )
 if(WIN32)
-  list(APPEND elfeed_sources src/http_win.cpp)
+  list(APPEND elfeed_sources src/http_win.cpp src/elfeed2.rc)
+  enable_language(RC)
 else()
   list(APPEND elfeed_sources src/http_posix.cpp)
 endif()
 
 add_executable(elfeed2 WIN32 MACOSX_BUNDLE ${elfeed_sources})
+
+if(WIN32)
+  # The RC compiler runs from the build dir; make it find the manifest
+  # next to the .rc file, and rebuild when the manifest changes.
+  set_source_files_properties(src/elfeed2.rc PROPERTIES
+    INCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    OBJECT_DEPENDS      "${CMAKE_CURRENT_SOURCE_DIR}/src/elfeed2.manifest"
+  )
+endif()
 
 target_link_libraries(elfeed2 PRIVATE
   wx::core wx::base wx::html wx::aui
