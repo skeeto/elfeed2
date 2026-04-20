@@ -63,6 +63,14 @@ void elfeed_shutdown(Elfeed *app)
 
 bool ElfeedApp::OnInit()
 {
+    // Set the global "current" narrow-string conversion to UTF-8.
+    // Note: this does NOT affect wxString(const char*) constructors —
+    // those bind to wxConvLibc at compile time. It only helps the wx
+    // APIs that explicitly consult wxConvCurrent (some legacy printf
+    // paths, env-var helpers). For UI strings containing non-ASCII
+    // literals, use wxT(...) / L"..." so wx never sees narrow bytes.
+    wxConvCurrent = &wxConvUTF8;
+
     SetAppName("elfeed2");
 
     elfeed_init(&state_);

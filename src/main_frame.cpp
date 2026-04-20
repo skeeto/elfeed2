@@ -244,16 +244,21 @@ void MainFrame::update_status()
     int active = app_->fetches_active.load();
     int total = app_->fetches_total.load();
 
+    // wxT() for format strings containing non-ASCII (… and ·): narrow
+    // literals route through wxConvLibc, which on Windows is CP1252
+    // and mangles UTF-8 bytes. Wide literals skip that path entirely.
     wxString msg;
     if (active > 0)
-        msg = wxString::Format("Fetching %d/%d …  %d unread of %d  ·  %d feeds",
-                               active, total, unread,
-                               (int)app_->entries.size(),
-                               (int)app_->feeds.size());
+        msg = wxString::Format(
+            wxT("Fetching %d/%d …  %d unread of %d  ·  %d feeds"),
+            active, total, unread,
+            (int)app_->entries.size(),
+            (int)app_->feeds.size());
     else
-        msg = wxString::Format("%d unread of %d  ·  %d feeds",
-                               unread, (int)app_->entries.size(),
-                               (int)app_->feeds.size());
+        msg = wxString::Format(
+            wxT("%d unread of %d  ·  %d feeds"),
+            unread, (int)app_->entries.size(),
+            (int)app_->feeds.size());
     SetStatusText(msg);
 }
 

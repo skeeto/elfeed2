@@ -39,6 +39,17 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(wxWidgets)
 
+# Force UTF-8 source AND execution charsets on MSVC. By default MSVC
+# picks the source charset based on the system locale, which on most
+# Windows installs is NOT UTF-8 — so non-ASCII literals (em-dash, middle
+# dot, etc.) in our sources would get reinterpreted at compile time and
+# emerge as mojibake at run time. Placed AFTER FetchContent_MakeAvailable
+# for wxWidgets so its bundled C/C++ deps keep their own settings. GCC,
+# Clang, and mingw already default to UTF-8 source/exec charsets.
+if(MSVC)
+  add_compile_options(/utf-8)
+endif()
+
 # --- SQLite3 (amalgamation) ---
 
 if(IS_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/deps/sqlite")
