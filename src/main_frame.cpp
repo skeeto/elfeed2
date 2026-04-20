@@ -1,14 +1,18 @@
 #include "main_frame.hpp"
 
 #include "downloads_panel.hpp"
+#include "elfeed_import.hpp"
 #include "entry_detail.hpp"
+#include "util.hpp"
 #include "entry_list.hpp"
 #include "events.hpp"
 #include "feeds_panel.hpp"
 #include "log_panel.hpp"
 
 #include <wx/aui/framemanager.h>
+#include <wx/busyinfo.h>
 #include <wx/clipbrd.h>
+#include <wx/filedlg.h>
 #include <wx/menu.h>
 #include <wx/msgdlg.h>
 #include <wx/srchctrl.h>
@@ -20,6 +24,7 @@
 
 enum {
     ID_Fetch = wxID_HIGHEST + 1,
+    ID_ImportClassic,
     ID_ToggleFeeds,
     ID_TogglePreview,
     ID_ToggleLog,
@@ -66,6 +71,8 @@ void MainFrame::build_menus()
 
     auto *m_elfeed = new wxMenu;
     m_elfeed->Append(ID_Fetch, "&Fetch All\tF5");
+    m_elfeed->AppendSeparator();
+    m_elfeed->Append(ID_ImportClassic, wxT("&Import Classic Elfeed Index…"));
     m_elfeed->AppendSeparator();
     m_elfeed->Append(wxID_EXIT, "&Quit\tCtrl+Q");
     mbar->Append(m_elfeed, "&Elfeed");
@@ -173,6 +180,7 @@ void MainFrame::bind_events()
 {
     Bind(wxEVT_ELFEED_WAKE, &MainFrame::on_wake, this);
     Bind(wxEVT_MENU, &MainFrame::on_fetch_all,        this, ID_Fetch);
+    Bind(wxEVT_MENU, &MainFrame::on_import_classic,   this, ID_ImportClassic);
     Bind(wxEVT_MENU, &MainFrame::on_toggle_feeds,     this, ID_ToggleFeeds);
     Bind(wxEVT_MENU, &MainFrame::on_toggle_preview,   this, ID_TogglePreview);
     Bind(wxEVT_MENU, &MainFrame::on_toggle_log,       this, ID_ToggleLog);
@@ -330,6 +338,63 @@ void MainFrame::on_fetch_all(wxCommandEvent &)
 {
     fetch_all(app_);
     update_status();
+}
+
+void MainFrame::on_import_classic(wxCommandEvent &)
+{
+    // Defer the dialog until the menu event has fully unwound. On
+    // macOS, opening a modal file dialog directly from inside a menu
+    // command handler sometimes fails to show because the menu bar
+    // dropdown is still closing; CallAfter runs the dialog at the
+    // next idle tick, after the menu is fully dismissed.
+    CallAfter([this] { do_import_classic(); });
+}
+
+void MainFrame::do_import_classic()
+{
+    // Only suggest ~/.elfeed as the default dir when it actually
+    // exists — macOS's NSOpenPanel ignores (or errors on) a missing
+    // default path. Fall back to the user's home directory otherwise.
+    wxString default_dir = wxString::FromUTF8(user_home_dir() + "/.elfeed");
+    if (!wxDirExists(default_dir))
+        default_dir = wxString::FromUTF8(user_home_dir());
+
+    wxFileDialog dlg(this,
+                     "Select Classic Elfeed index file",
+                     default_dir,
+                     wxEmptyString,
+                     "All files (*)|*",
+                     wxFD_OPEN | wxFD_FILE_MUST_EXIST);
+    if (dlg.ShowModal() != wxID_OK) return;
+
+    std::string path = dlg.GetPath().utf8_string();
+    ImportStats stats;
+    {
+        wxBusyInfo busy(wxT("Importing Classic Elfeed index…"), this);
+        wxYield();  // give wxBusyInfo a chance to paint
+        stats = import_classic_elfeed(app_, path);
+    }
+
+    if (!stats.error.empty()) {
+        wxMessageBox(wxString::FromUTF8("Import failed: " + stats.error),
+                     "Import Error", wxOK | wxICON_ERROR, this);
+        return;
+    }
+
+    // Refresh the UI to show imported content
+    requery();
+    if (feeds_) feeds_->refresh();
+    update_status();
+
+    wxMessageBox(
+        wxString::Format(
+            "Imported %d feeds and %d entries.%s",
+            stats.feeds_imported, stats.entries_imported,
+            stats.entries_skipped > 0
+                ? wxString::Format("\n(Skipped %d malformed entries.)",
+                                   stats.entries_skipped)
+                : wxString()),
+        "Import Complete", wxOK | wxICON_INFORMATION, this);
 }
 
 void MainFrame::on_toggle_feeds(wxCommandEvent &)     { toggle_pane("feeds"); }

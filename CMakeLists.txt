@@ -152,6 +152,7 @@ set(elfeed_sources
   src/fetch.cpp
   src/download.cpp
   src/util.cpp
+  src/elfeed_import.cpp
 )
 if(WIN32)
   list(APPEND elfeed_sources src/http_win.cpp src/elfeed2.rc)
@@ -161,6 +162,21 @@ else()
 endif()
 
 add_executable(elfeed2 WIN32 MACOSX_BUNDLE ${elfeed_sources})
+
+if(APPLE)
+  # Ship an Info.plist — otherwise the bundle has no CFBundleIdentifier,
+  # and NSOpenPanel / NSSavePanel fail to appear with "domain name
+  # cannot be nil or empty" because they key their remembered state on
+  # the bundle ID. CMake's built-in MacOSXBundleInfo.plist.in template
+  # isn't always found under Ninja; provide our own so we're certain.
+  set_target_properties(elfeed2 PROPERTIES
+    MACOSX_BUNDLE_INFO_PLIST          "${CMAKE_CURRENT_SOURCE_DIR}/src/Info.plist.in"
+    MACOSX_BUNDLE_GUI_IDENTIFIER      "com.nullprogram.elfeed2"
+    MACOSX_BUNDLE_BUNDLE_NAME         "elfeed2"
+    MACOSX_BUNDLE_BUNDLE_VERSION      "${PROJECT_VERSION}"
+    MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
+  )
+endif()
 
 if(WIN32)
   # The RC compiler runs from the build dir; make it find the manifest
