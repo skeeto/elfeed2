@@ -74,8 +74,12 @@ HttpResponse http_fetch(const HttpRequest &req)
     cli.set_read_timeout(req.timeout_seconds, 0);
     cli.set_write_timeout(req.timeout_seconds, 0);
     cli.set_follow_location(true);
+    // Don't ask for compression: cpp-httplib only decompresses when
+    // built with CPPHTTPLIB_ZLIB_SUPPORT, which we don't link. Without
+    // this, Accept-Encoding: gzip would cause pugixml to choke on
+    // gzipped bytes. Identity encoding keeps the pipeline simple.
     cli.set_compress(false);
-    cli.set_decompress(true);
+    cli.set_decompress(false);
     cli.set_keep_alive(false);
 
     // TLS: verify server certificate against the system CA bundle.
@@ -91,7 +95,6 @@ HttpResponse http_fetch(const HttpRequest &req)
         headers.emplace("If-None-Match", req.etag);
     if (!req.last_modified.empty())
         headers.emplace("If-Modified-Since", req.last_modified);
-    headers.emplace("Accept-Encoding", "gzip, deflate");
 
     auto res = cli.Get(path, headers);
     if (!res) {

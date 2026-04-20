@@ -615,7 +615,21 @@ FeedParseResult parse_feed(const std::string &url, const std::string &xml_body)
     auto parse_result = doc.load_buffer(xml_body.data(), xml_body.size(),
                                         pugi::parse_default |
                                         pugi::parse_cdata);
-    if (!parse_result) return result;
+    if (!parse_result) {
+        // Expose the pugixml failure as a "parse_error" pseudo-title so
+        // it shows up in the fetch log instead of silently giving 0
+        // entries. Common causes: gzip-compressed body (Accept-Encoding
+        // surprise), HTML error page despite a 200 OK, or malformed
+        // XML. Include a short prefix of the body for quick diagnosis.
+        std::string prefix = xml_body.substr(
+            0, std::min<size_t>(32, xml_body.size()));
+        // Replace unprintable bytes with '.'
+        for (auto &c : prefix) if ((unsigned char)c < 0x20) c = '.';
+        result.feed_title = std::string("parse_error: ") +
+                            parse_result.description() +
+                            " [body: " + prefix + "]";
+        return result;
+    }
 
     auto root = doc.first_child();
     if (!root) return result;

@@ -145,7 +145,9 @@ HttpResponse http_fetch(const HttpRequest &req)
         add_header("If-None-Match: " + req.etag);
     if (!req.last_modified.empty())
         add_header("If-Modified-Since: " + req.last_modified);
-    add_header("Accept-Encoding: gzip, deflate");
+    // WinHTTP can decompress via WINHTTP_OPTION_DECOMPRESSION, but we
+    // don't enable it; keep the response identity-encoded so pugixml
+    // can parse it directly.
 
     BOOL ok = WinHttpSendRequest(hreq, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
                                  WINHTTP_NO_REQUEST_DATA, 0, 0, 0);
