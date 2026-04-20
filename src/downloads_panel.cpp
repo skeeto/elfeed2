@@ -4,6 +4,8 @@
 #include <wx/listctrl.h>
 #include <wx/sizer.h>
 
+#include <unordered_set>
+
 DownloadsPanel::DownloadsPanel(wxWindow *parent, Elfeed *app)
     : wxPanel(parent, wxID_ANY)
     , app_(app)
@@ -35,9 +37,11 @@ DownloadsPanel::DownloadsPanel(wxWindow *parent, Elfeed *app)
 
 void DownloadsPanel::refresh()
 {
-    snapshot_.clear();
+    // Build new snapshot. Downloads live on the UI thread only;
+    // no mutex needed.
+    std::vector<Row> new_snap;
+    new_snap.reserve(app_->downloads.size());
     int active_id = app_->download_active_id;
-    // Downloads live on the UI thread only; no mutex needed.
     for (auto &d : app_->downloads) {
         Row r;
         r.id = d.id;
@@ -47,27 +51,63 @@ void DownloadsPanel::refresh()
         r.total = d.total;
         r.name = d.title.empty() ? d.url : d.title;
         r.failures = d.failures;
-        snapshot_.push_back(std::move(r));
+        new_snap.push_back(std::move(r));
     }
 
-    list_->DeleteAllItems();
-    for (size_t i = 0; i < snapshot_.size(); i++) {
-        const Row &r = snapshot_[i];
-        wxString pct;
-        if (r.active)
-            pct = r.progress.empty() ? "..." : wxString::FromUTF8(r.progress);
-        else if (r.paused)
-            pct = "paused";
-        else
-            pct = "queued";
-        long item = list_->InsertItem((long)i, pct);
-        list_->SetItem(item, 1, wxString::FromUTF8(r.total));
-        list_->SetItem(item, 2, wxString::FromUTF8(r.name));
-        list_->SetItem(item, 3, r.failures > 0
-                                    ? wxString::Format("%d", r.failures)
-                                    : wxString());
-        list_->SetItemData(item, (wxUIntPtr)r.id);
+    // Differential update. Wrapping in Freeze/Thaw prevents intermediate
+    // repaints when rows are added/removed mid-batch.
+    list_->Freeze();
+
+    // Phase 1: drop rows whose ids are no longer present. Walk backward
+    // so prior indices stay valid as we delete.
+    std::unordered_set<int> new_ids;
+    new_ids.reserve(new_snap.size());
+    for (auto &r : new_snap) new_ids.insert(r.id);
+    for (long i = list_->GetItemCount() - 1; i >= 0; i--) {
+        int id = (int)list_->GetItemData(i);
+        if (!new_ids.count(id)) list_->DeleteItem(i);
     }
+
+    // Phase 2: for each row in the new snapshot, make sure position i
+    // holds its id. Insert a new row if it's not already there; then
+    // update column text differentially.
+    for (size_t i = 0; i < new_snap.size(); i++) {
+        long row = (long)i;
+        bool mismatch = row >= list_->GetItemCount() ||
+                        (int)list_->GetItemData(row) != new_snap[i].id;
+        if (mismatch) {
+            list_->InsertItem(row, wxEmptyString);
+            list_->SetItemData(row, (wxUIntPtr)new_snap[i].id);
+        }
+        update_row(row, new_snap[i]);
+    }
+
+    list_->Thaw();
+
+    snapshot_ = std::move(new_snap);
+}
+
+void DownloadsPanel::update_row(long row, const Row &r)
+{
+    wxString pct;
+    if (r.active)
+        pct = r.progress.empty() ? wxString("...")
+                                 : wxString::FromUTF8(r.progress);
+    else if (r.paused)
+        pct = "paused";
+    else
+        pct = "queued";
+    wxString total = wxString::FromUTF8(r.total);
+    wxString name  = wxString::FromUTF8(r.name);
+    wxString fails = r.failures > 0 ? wxString::Format("%d", r.failures)
+                                    : wxString();
+
+    // Only SetItem on columns whose text changed — wx repaints the
+    // cell on every SetItem regardless.
+    if (list_->GetItemText(row, 0) != pct)   list_->SetItem(row, 0, pct);
+    if (list_->GetItemText(row, 1) != total) list_->SetItem(row, 1, total);
+    if (list_->GetItemText(row, 2) != name)  list_->SetItem(row, 2, name);
+    if (list_->GetItemText(row, 3) != fails) list_->SetItem(row, 3, fails);
 }
 
 void DownloadsPanel::on_pause(wxCommandEvent &)

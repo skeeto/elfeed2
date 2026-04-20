@@ -13,18 +13,12 @@ class DownloadsPanel : public wxPanel {
 public:
     DownloadsPanel(wxWindow *parent, Elfeed *app);
 
-    // Re-snapshot app_->downloads under the lock and refresh the list.
+    // Re-snapshot app_->downloads and update the list. Updates are
+    // differential so selection and scroll position survive the
+    // frequent progress-driven refreshes.
     void refresh();
 
 private:
-    void on_pause(wxCommandEvent &);
-    void on_remove(wxCommandEvent &);
-
-    Elfeed *app_;
-    wxListCtrl *list_ = nullptr;
-    wxButton *btn_pause_ = nullptr;
-    wxButton *btn_remove_ = nullptr;
-
     struct Row {
         int id;
         bool paused;
@@ -34,6 +28,18 @@ private:
         std::string name;
         int failures;
     };
+
+    void on_pause(wxCommandEvent &);
+    void on_remove(wxCommandEvent &);
+    // Update columns in row `row` to match `r`, SetItem-ing only the
+    // columns whose text actually changed (so wx doesn't repaint the
+    // whole row on every tick).
+    void update_row(long row, const Row &r);
+
+    Elfeed *app_;
+    wxListCtrl *list_ = nullptr;
+    wxButton *btn_pause_ = nullptr;
+    wxButton *btn_remove_ = nullptr;
     std::vector<Row> snapshot_;
 };
 
