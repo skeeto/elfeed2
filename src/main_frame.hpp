@@ -24,6 +24,13 @@ public:
     // Sets the filter to `=<feed_url>` (show only that feed).
     void set_filter_to_feed(const std::string &feed_url);
 
+    // Show a transient confirmation message in the status bar (e.g.
+    // "Copied to clipboard"). Restored to the normal status text
+    // after a short delay so the feedback registers but doesn't
+    // linger. Safe to call from any panel via dynamic_cast on
+    // wxGetTopLevelParent.
+    void flash_status(const wxString &msg);
+
 private:
     // ---- Building ----
     void build_menus();
@@ -107,6 +114,10 @@ private:
     // minute-level display resolution; past an hour the display
     // changes rarely enough that the interval is invisible.
     wxTimer status_timer_;
+
+    // One-shot timer for flash_status: restores the regular status
+    // text a couple seconds after a transient confirmation was shown.
+    wxTimer flash_timer_;
 };
 
 #endif

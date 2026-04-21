@@ -1,4 +1,5 @@
 #include "feeds_panel.hpp"
+#include "main_frame.hpp"
 #include "util.hpp"
 
 #include <wx/clipbrd.h>
@@ -170,6 +171,12 @@ bool FeedsPanel::copy_to_clipboard(const std::string &text)
     wxTheClipboard->SetData(
         new wxTextDataObject(wxString::FromUTF8(text)));
     wxTheClipboard->Close();
+    // Confirm in the status bar via the parent frame. Walking the
+    // window tree avoids hardcoding a back-pointer to MainFrame.
+    if (auto *frame =
+            dynamic_cast<MainFrame *>(wxGetTopLevelParent(this))) {
+        frame->flash_status(wxString::FromUTF8("Copied: " + text));
+    }
     return true;
 }
 

@@ -98,6 +98,14 @@ MainFrame::MainFrame(Elfeed *app)
          status_timer_.GetId());
     status_timer_.Start(60 * 1000);
 
+    // One-shot revert timer for flash_status. Same handler — restoring
+    // the regular status text — but a separate ID so it doesn't get
+    // confused with the recurring tick above.
+    flash_timer_.SetOwner(this);
+    Bind(wxEVT_TIMER,
+         [this](wxTimerEvent &) { update_status(); },
+         flash_timer_.GetId());
+
     // Focus the entry list so vi-style keys work immediately.
     CallAfter([this] { list_->SetFocus(); });
 }
@@ -329,6 +337,15 @@ void MainFrame::requery()
         detail_->show_entry(&app_->entries[(size_t)new_primary]);
     else
         detail_->show_entry(nullptr);
+}
+
+void MainFrame::flash_status(const wxString &msg)
+{
+    // Restart the timer on each call so consecutive flashes (e.g.
+    // user copies several entries in quick succession) each get
+    // their full visibility window before reverting.
+    SetStatusText(msg);
+    flash_timer_.StartOnce(2000);
 }
 
 void MainFrame::update_status()
@@ -834,18 +851,32 @@ void MainFrame::action_open_in_browser()
 void MainFrame::action_copy_link()
 {
     auto sel = list_->selection();
-    std::string urls;
+    std::vector<std::string> urls;
     for (long i : sel) {
         if (i < 0 || (size_t)i >= app_->entries.size()) continue;
-        if (!urls.empty()) urls += '\n';
-        urls += app_->entries[(size_t)i].link;
+        const std::string &link = app_->entries[(size_t)i].link;
+        if (!link.empty()) urls.push_back(link);
     }
     if (urls.empty()) return;
+
+    std::string joined;
+    for (auto &u : urls) {
+        if (!joined.empty()) joined += '\n';
+        joined += u;
+    }
     if (wxTheClipboard->Open()) {
         wxTheClipboard->SetData(
-            new wxTextDataObject(wxString::FromUTF8(urls)));
+            new wxTextDataObject(wxString::FromUTF8(joined)));
         wxTheClipboard->Close();
     }
+    // Confirm the copy in the status bar — silent yank is hard to
+    // tell apart from a misfire. For a single URL show the URL
+    // itself so the user can sanity-check it; for many show a count.
+    if (urls.size() == 1)
+        flash_status(wxString::FromUTF8("Copied: " + urls[0]));
+    else
+        flash_status(wxString::Format("Copied %zu URLs to clipboard",
+                                      urls.size()));
 }
 
 void MainFrame::action_download()
