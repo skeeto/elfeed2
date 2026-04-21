@@ -239,15 +239,21 @@ void db_add_entries(Elfeed *app, std::vector<Entry> &entries)
 
     sqlite3_exec(app->db, "BEGIN", nullptr, nullptr, nullptr);
 
-    // Main row upsert. content/content_type can change on refetch; the
-    // primary key (namespace,id) is stable.
+    // Main row upsert. title/link/content can change on refetch; the
+    // primary key (namespace,id) is stable. Date is deliberately NOT
+    // updated: feeds with entries that have no published date make
+    // the parser fall back to time(now), so every refetch would bump
+    // the stored date forward and the entry would perpetually bubble
+    // to the top of date-sorted views. Preserving first-sight date
+    // also ignores the rare case where a feed corrects a published
+    // date, which is an acceptable trade-off.
     const char *upsert =
         "INSERT INTO entry (namespace,id,feed_url,title,link,date,"
         "content,content_type)"
         " VALUES (?,?,?,?,?,?,?,?)"
         " ON CONFLICT(namespace,id) DO UPDATE SET"
         " title=excluded.title,link=excluded.link,"
-        " date=excluded.date,content=excluded.content,"
+        " content=excluded.content,"
         " content_type=excluded.content_type";
 
     // Existence probe so we can tell INSERT from UPDATE on the upsert
