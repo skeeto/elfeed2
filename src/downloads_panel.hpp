@@ -1,24 +1,25 @@
 #ifndef ELFEED_DOWNLOADS_PANEL_HPP
 #define ELFEED_DOWNLOADS_PANEL_HPP
 
+#include <wx/dataview.h>
 #include <wx/panel.h>
 #include "elfeed.hpp"
 
-class wxListCtrl;
 class wxButton;
+class DownloadsPanelModel;
 
 // Download queue as a wxAUI-dockable panel. Columns: %, Size, Name,
 // Failures. Pause/Resume/Remove buttons act on the selected row(s).
+// Backed by wxDataViewCtrl: column show/hide via right-click header,
+// reorder by drag.
 class DownloadsPanel : public wxPanel {
 public:
     DownloadsPanel(wxWindow *parent, Elfeed *app);
 
-    // Re-snapshot app_->downloads and update the list. Updates are
-    // differential so selection and scroll position survive the
-    // frequent progress-driven refreshes.
+    // Re-snapshot app->downloads and update the list.
     void refresh();
 
-private:
+    // The currently-displayed snapshot, used by the model.
     struct Row {
         int id;
         bool paused;
@@ -29,17 +30,17 @@ private:
         int failures;
     };
 
+private:
     void on_pause(wxCommandEvent &);
     void on_remove(wxCommandEvent &);
-    // Update columns in row `row` to match `r`, SetItem-ing only the
-    // columns whose text actually changed (so wx doesn't repaint the
-    // whole row on every tick).
-    void update_row(long row, const Row &r);
 
     Elfeed *app_;
-    wxListCtrl *list_ = nullptr;
+    wxDataViewCtrl *list_ = nullptr;
+    wxObjectDataPtr<DownloadsPanelModel> model_;
     wxButton *btn_pause_ = nullptr;
     wxButton *btn_remove_ = nullptr;
+
+    friend class DownloadsPanelModel;
     std::vector<Row> snapshot_;
 };
 

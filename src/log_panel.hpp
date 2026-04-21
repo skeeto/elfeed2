@@ -1,14 +1,17 @@
 #ifndef ELFEED_LOG_PANEL_HPP
 #define ELFEED_LOG_PANEL_HPP
 
+#include <wx/dataview.h>
 #include <wx/panel.h>
 #include "elfeed.hpp"
 
 class wxCheckBox;
-class LogList;  // defined in log_panel.cpp
+class LogListModel;
 
 // Fetch/download log as a wxAUI-dockable panel. Four columns: Time,
 // Type, URL, Result. Filter checkboxes at top hide message kinds.
+// Backed by wxDataViewCtrl so the column-visibility menu and reorder
+// drag come for free.
 class LogPanel : public wxPanel {
 public:
     LogPanel(wxWindow *parent, Elfeed *app);
@@ -27,9 +30,10 @@ private:
     wxCheckBox *cb_ok_ = nullptr;
     wxCheckBox *cb_err_ = nullptr;
     wxCheckBox *cb_autoscroll_ = nullptr;
-    LogList *list_ = nullptr;
+    wxDataViewCtrl *list_ = nullptr;
+    wxObjectDataPtr<LogListModel> model_;
 
-    friend class LogList;
+    friend class LogListModel;
     std::vector<LogEntry> snapshot_;
 };
 

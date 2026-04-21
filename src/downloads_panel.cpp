@@ -1,10 +1,55 @@
 #include "downloads_panel.hpp"
 
 #include <wx/button.h>
-#include <wx/listctrl.h>
 #include <wx/sizer.h>
+#include <wx/variant.h>
 
 #include <unordered_set>
+
+class DownloadsPanelModel : public wxDataViewVirtualListModel {
+public:
+    DownloadsPanelModel(DownloadsPanel *owner) : owner_(owner) {}
+
+    unsigned int GetColumnCount() const override { return 4; }
+    wxString GetColumnType(unsigned int) const override { return "string"; }
+
+    void GetValueByRow(wxVariant &value,
+                       unsigned int row,
+                       unsigned int col) const override
+    {
+        if (row >= owner_->snapshot_.size()) { value = wxString(); return; }
+        const DownloadsPanel::Row &r = owner_->snapshot_[row];
+        switch (col) {
+        case 0: {
+            wxString pct;
+            if (r.active)
+                pct = r.progress.empty() ? wxString("...")
+                                         : wxString::FromUTF8(r.progress);
+            else if (r.paused)
+                pct = "paused";
+            else
+                pct = "queued";
+            value = pct;
+            return;
+        }
+        case 1: value = wxString::FromUTF8(r.total); return;
+        case 2: value = wxString::FromUTF8(r.name);  return;
+        case 3:
+            value = r.failures > 0 ? wxString::Format("%d", r.failures)
+                                   : wxString();
+            return;
+        }
+        value = wxString();
+    }
+
+    bool SetValueByRow(const wxVariant &, unsigned int, unsigned int) override
+    {
+        return false;
+    }
+
+private:
+    DownloadsPanel *owner_;
+};
 
 DownloadsPanel::DownloadsPanel(wxWindow *parent, Elfeed *app)
     : wxPanel(parent, wxID_ANY)
@@ -19,12 +64,24 @@ DownloadsPanel::DownloadsPanel(wxWindow *parent, Elfeed *app)
     hsz->Add(btn_remove_, 0, wxALL, FromDIP(4));
     vsz->Add(hsz, 0, wxEXPAND);
 
-    list_ = new wxListCtrl(this, wxID_ANY, wxDefaultPosition, wxDefaultSize,
-                           wxLC_REPORT);
-    list_->AppendColumn("%",     wxLIST_FORMAT_LEFT, FromDIP(80));
-    list_->AppendColumn("Size",  wxLIST_FORMAT_LEFT, FromDIP(80));
-    list_->AppendColumn("Name",  wxLIST_FORMAT_LEFT, FromDIP(380));
-    list_->AppendColumn("Fails", wxLIST_FORMAT_LEFT, FromDIP(50));
+    list_ = new wxDataViewCtrl(this, wxID_ANY,
+                               wxDefaultPosition, wxDefaultSize,
+                               wxDV_MULTIPLE | wxDV_ROW_LINES |
+                               wxDV_VERT_RULES);
+    model_ = new DownloadsPanelModel(this);
+    list_->AssociateModel(model_.get());
+
+    const int col_flags = wxDATAVIEW_COL_RESIZABLE |
+                          wxDATAVIEW_COL_REORDERABLE |
+                          wxDATAVIEW_COL_HIDDEN;
+    list_->AppendTextColumn("%",     0, wxDATAVIEW_CELL_INERT,
+                            FromDIP(80),  wxALIGN_LEFT, col_flags);
+    list_->AppendTextColumn("Size",  1, wxDATAVIEW_CELL_INERT,
+                            FromDIP(80),  wxALIGN_LEFT, col_flags);
+    list_->AppendTextColumn("Name",  2, wxDATAVIEW_CELL_INERT,
+                            FromDIP(380), wxALIGN_LEFT, col_flags);
+    list_->AppendTextColumn("Fails", 3, wxDATAVIEW_CELL_INERT,
+                            FromDIP(50),  wxALIGN_LEFT, col_flags);
     vsz->Add(list_, 1, wxEXPAND);
 
     SetSizer(vsz);
@@ -37,8 +94,7 @@ DownloadsPanel::DownloadsPanel(wxWindow *parent, Elfeed *app)
 
 void DownloadsPanel::refresh()
 {
-    // Build new snapshot. Downloads live on the UI thread only;
-    // no mutex needed.
+    // Build new snapshot. Downloads live on the UI thread only.
     std::vector<Row> new_snap;
     new_snap.reserve(app_->downloads.size());
     int active_id = app_->download_active_id;
@@ -54,81 +110,60 @@ void DownloadsPanel::refresh()
         new_snap.push_back(std::move(r));
     }
 
-    // Differential update. Wrapping in Freeze/Thaw prevents intermediate
-    // repaints when rows are added/removed mid-batch.
-    list_->Freeze();
+    // Differential update so selection and scroll position survive
+    // the frequent progress-driven refreshes. download.cpp doesn't
+    // reorder app->downloads (only push_back for new, erase for
+    // finished), so old and new snapshots are aligned subsequences.
 
-    // Phase 1: drop rows whose ids are no longer present. Walk backward
-    // so prior indices stay valid as we delete.
+    // Phase 1: remove rows whose id is gone. Walk backward so prior
+    // indices stay valid as we delete.
     std::unordered_set<int> new_ids;
     new_ids.reserve(new_snap.size());
     for (auto &r : new_snap) new_ids.insert(r.id);
-    for (long i = list_->GetItemCount() - 1; i >= 0; i--) {
-        int id = (int)list_->GetItemData(i);
-        if (!new_ids.count(id)) list_->DeleteItem(i);
-    }
-
-    // Phase 2: for each row in the new snapshot, make sure position i
-    // holds its id. Insert a new row if it's not already there; then
-    // update column text differentially.
-    for (size_t i = 0; i < new_snap.size(); i++) {
-        long row = (long)i;
-        bool mismatch = row >= list_->GetItemCount() ||
-                        (int)list_->GetItemData(row) != new_snap[i].id;
-        if (mismatch) {
-            list_->InsertItem(row, wxEmptyString);
-            list_->SetItemData(row, (wxUIntPtr)new_snap[i].id);
+    for (size_t i = snapshot_.size(); i-- > 0; ) {
+        if (!new_ids.count(snapshot_[i].id)) {
+            snapshot_.erase(snapshot_.begin() + i);
+            model_->RowDeleted((unsigned int)i);
         }
-        update_row(row, new_snap[i]);
     }
 
-    list_->Thaw();
-
-    snapshot_ = std::move(new_snap);
-}
-
-void DownloadsPanel::update_row(long row, const Row &r)
-{
-    wxString pct;
-    if (r.active)
-        pct = r.progress.empty() ? wxString("...")
-                                 : wxString::FromUTF8(r.progress);
-    else if (r.paused)
-        pct = "paused";
-    else
-        pct = "queued";
-    wxString total = wxString::FromUTF8(r.total);
-    wxString name  = wxString::FromUTF8(r.name);
-    wxString fails = r.failures > 0 ? wxString::Format("%d", r.failures)
-                                    : wxString();
-
-    // Only SetItem on columns whose text changed — wx repaints the
-    // cell on every SetItem regardless.
-    if (list_->GetItemText(row, 0) != pct)   list_->SetItem(row, 0, pct);
-    if (list_->GetItemText(row, 1) != total) list_->SetItem(row, 1, total);
-    if (list_->GetItemText(row, 2) != name)  list_->SetItem(row, 2, name);
-    if (list_->GetItemText(row, 3) != fails) list_->SetItem(row, 3, fails);
+    // Phase 2: align snapshot_ to new_snap. Where the id matches, just
+    // refresh the row data and emit RowChanged (cheap). Where it
+    // doesn't, the new row is brand new — insert it.
+    for (size_t i = 0; i < new_snap.size(); i++) {
+        if (i >= snapshot_.size() || snapshot_[i].id != new_snap[i].id) {
+            snapshot_.insert(snapshot_.begin() + i, new_snap[i]);
+            model_->RowInserted((unsigned int)i);
+        } else {
+            snapshot_[i] = new_snap[i];
+            model_->RowChanged((unsigned int)i);
+        }
+    }
 }
 
 void DownloadsPanel::on_pause(wxCommandEvent &)
 {
-    long idx = -1;
-    while ((idx = list_->GetNextItem(idx, wxLIST_NEXT_ALL,
-                                     wxLIST_STATE_SELECTED)) != -1) {
-        int id = (int)list_->GetItemData(idx);
-        download_pause(app_, id);
+    wxDataViewItemArray sel;
+    list_->GetSelections(sel);
+    for (auto &item : sel) {
+        if (!item.IsOk()) continue;
+        unsigned row = model_->GetRow(item);
+        if (row < snapshot_.size())
+            download_pause(app_, snapshot_[row].id);
     }
     refresh();
 }
 
 void DownloadsPanel::on_remove(wxCommandEvent &)
 {
-    // Collect selected ids first; download_remove mutates the vector.
+    // Collect ids first; download_remove mutates the queue.
+    wxDataViewItemArray sel;
+    list_->GetSelections(sel);
     std::vector<int> ids;
-    long idx = -1;
-    while ((idx = list_->GetNextItem(idx, wxLIST_NEXT_ALL,
-                                     wxLIST_STATE_SELECTED)) != -1) {
-        ids.push_back((int)list_->GetItemData(idx));
+    for (auto &item : sel) {
+        if (!item.IsOk()) continue;
+        unsigned row = model_->GetRow(item);
+        if (row < snapshot_.size()) ids.push_back(snapshot_[row].id);
     }
     for (int id : ids) download_remove(app_, id);
     refresh();

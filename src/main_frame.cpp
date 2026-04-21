@@ -196,9 +196,9 @@ void MainFrame::bind_events()
     });
     filter_->Bind(wxEVT_CHAR_HOOK, &MainFrame::on_filter_key, this);
 
-    list_->Bind(wxEVT_LIST_ITEM_SELECTED,
+    list_->Bind(wxEVT_DATAVIEW_SELECTION_CHANGED,
                 &MainFrame::on_list_selected, this);
-    list_->Bind(wxEVT_LIST_ITEM_ACTIVATED,
+    list_->Bind(wxEVT_DATAVIEW_ITEM_ACTIVATED,
                 &MainFrame::on_list_activated, this);
     list_->Bind(wxEVT_CHAR_HOOK, &MainFrame::on_list_key, this);
 }
@@ -229,10 +229,8 @@ void MainFrame::requery()
     }
     if (new_primary < 0 && !app_->entries.empty()) new_primary = 0;
     if (new_primary >= 0) {
-        list_->SetItemState(new_primary,
-                            wxLIST_STATE_SELECTED | wxLIST_STATE_FOCUSED,
-                            wxLIST_STATE_SELECTED | wxLIST_STATE_FOCUSED);
-        list_->EnsureVisible(new_primary);
+        list_->select_only(new_primary);
+        list_->ensure_visible_row(new_primary);
     }
 
     if (new_primary >= 0 && (size_t)new_primary < app_->entries.size())
@@ -434,14 +432,14 @@ void MainFrame::on_pane_close(wxAuiManagerEvent &e)
     CallAfter([this] { update_menu_checks(); });
 }
 
-void MainFrame::on_list_selected(wxListEvent &e)
+void MainFrame::on_list_selected(wxDataViewEvent &)
 {
-    long idx = e.GetIndex();
-    if (idx >= 0 && (size_t)idx < app_->entries.size())
-        detail_->show_entry(&app_->entries[(size_t)idx]);
+    long p = list_->primary();
+    if (p >= 0 && (size_t)p < app_->entries.size())
+        detail_->show_entry(&app_->entries[(size_t)p]);
 }
 
-void MainFrame::on_list_activated(wxListEvent &)
+void MainFrame::on_list_activated(wxDataViewEvent &)
 {
     action_mark_read();
 }
@@ -490,9 +488,6 @@ void MainFrame::on_filter_key(wxKeyEvent &e)
 
 // ---- Selection helpers ---------------------------------------------
 
-static constexpr long kSelectAndFocus =
-    wxLIST_STATE_SELECTED | wxLIST_STATE_FOCUSED;
-
 void MainFrame::move_selection(int delta)
 {
     long p = list_->primary();
@@ -500,20 +495,16 @@ void MainFrame::move_selection(int delta)
     if (p < 0) return;
     long target = p + delta;
     if (target < 0 || target >= n) return;
-    list_->SetItemState(p, 0, kSelectAndFocus);
-    list_->SetItemState(target, kSelectAndFocus, kSelectAndFocus);
-    list_->EnsureVisible(target);
+    list_->select_only(target);
+    list_->ensure_visible_row(target);
 }
 
 void MainFrame::go_to(long row)
 {
     long n = (long)app_->entries.size();
     if (row < 0 || row >= n) return;
-    long p = list_->primary();
-    if (p >= 0 && p != row)
-        list_->SetItemState(p, 0, kSelectAndFocus);
-    list_->SetItemState(row, kSelectAndFocus, kSelectAndFocus);
-    list_->EnsureVisible(row);
+    list_->select_only(row);
+    list_->ensure_visible_row(row);
 }
 
 void MainFrame::advance_from(long row)
@@ -522,9 +513,8 @@ void MainFrame::advance_from(long row)
     long next = row + 1;
     if (next >= n) next = n - 1;
     if (next < 0) return;
-    if (next != row) list_->SetItemState(row, 0, kSelectAndFocus);
-    list_->SetItemState(next, kSelectAndFocus, kSelectAndFocus);
-    list_->EnsureVisible(next);
+    list_->select_only(next);
+    list_->ensure_visible_row(next);
     detail_->show_entry(&app_->entries[(size_t)next]);
 }
 
@@ -555,8 +545,8 @@ void MainFrame::action_mark_read()
     for (long i : sel) {
         if (i < 0 || (size_t)i >= app_->entries.size()) continue;
         strip_unread(app_->entries[(size_t)i], app_);
+        list_->refresh_row(i);
     }
-    list_->refresh_items();
     if (sel.size() == 1) advance_from(sel[0]);
     update_status();
 }
@@ -568,8 +558,8 @@ void MainFrame::action_mark_unread()
     for (long i : sel) {
         if (i < 0 || (size_t)i >= app_->entries.size()) continue;
         add_unread(app_->entries[(size_t)i], app_);
+        list_->refresh_row(i);
     }
-    list_->refresh_items();
     if (sel.size() == 1) advance_from(sel[0]);
     update_status();
 }
@@ -634,8 +624,8 @@ void MainFrame::action_download()
             download_enqueue(app_, e.link, e.title, /*is_video=*/true);
         }
         strip_unread(e, app_);
+        list_->refresh_row(i);
     }
-    list_->refresh_items();
     download_tick(app_);
     if (pane_shown("downloads") && downloads_) downloads_->refresh();
     if (sel.size() == 1) advance_from(sel[0]);

@@ -3,29 +3,8 @@
 
 #include <wx/button.h>
 #include <wx/checkbox.h>
-#include <wx/listctrl.h>
 #include <wx/sizer.h>
-
-// Virtual list that reads from LogPanel::snapshot_.
-class LogList : public wxListCtrl {
-public:
-    LogList(wxWindow *parent, LogPanel *owner)
-        : wxListCtrl(parent, wxID_ANY, wxDefaultPosition, wxDefaultSize,
-                     wxLC_REPORT | wxLC_VIRTUAL)
-        , owner_(owner)
-    {
-        AppendColumn("Time",   wxLIST_FORMAT_LEFT, FromDIP(140));
-        AppendColumn("Type",   wxLIST_FORMAT_LEFT, FromDIP(50));
-        AppendColumn("URL",    wxLIST_FORMAT_LEFT, FromDIP(250));
-        AppendColumn("Result", wxLIST_FORMAT_LEFT, FromDIP(400));
-    }
-
-protected:
-    wxString OnGetItemText(long item, long column) const override;
-
-private:
-    LogPanel *owner_;
-};
+#include <wx/variant.h>
 
 static const char *kind_name(LogKind k)
 {
@@ -38,29 +17,52 @@ static const char *kind_name(LogKind k)
     return "?";
 }
 
-wxString LogList::OnGetItemText(long item, long column) const
-{
-    if (item < 0 || (size_t)item >= owner_->snapshot_.size()) return {};
-    const LogEntry &e = owner_->snapshot_[(size_t)item];
+class LogListModel : public wxDataViewVirtualListModel {
+public:
+    LogListModel(LogPanel *owner) : owner_(owner) {}
 
-    switch (column) {
-    case 0:
-        return wxString::FromUTF8(format_datetime(e.time));
-    case 1:
-        return wxString::FromUTF8(kind_name(e.kind));
-    case 2:
-    case 3: {
-        auto colon = e.message.find(": ");
-        if (colon == std::string::npos) {
-            return column == 2 ? wxString::FromUTF8(e.message) : wxString{};
+    unsigned int GetColumnCount() const override { return 4; }
+    wxString GetColumnType(unsigned int) const override { return "string"; }
+
+    void GetValueByRow(wxVariant &value,
+                       unsigned int row,
+                       unsigned int col) const override
+    {
+        if (row >= owner_->snapshot_.size()) { value = wxString(); return; }
+        const LogEntry &e = owner_->snapshot_[row];
+        switch (col) {
+        case 0:
+            value = wxString::FromUTF8(format_datetime(e.time));
+            return;
+        case 1:
+            value = wxString::FromUTF8(kind_name(e.kind));
+            return;
+        case 2:
+        case 3: {
+            auto colon = e.message.find(": ");
+            if (colon == std::string::npos) {
+                value = (col == 2) ? wxString::FromUTF8(e.message)
+                                   : wxString();
+                return;
+            }
+            if (col == 2)
+                value = wxString::FromUTF8(e.message.substr(0, colon));
+            else
+                value = wxString::FromUTF8(e.message.substr(colon + 2));
+            return;
         }
-        if (column == 2)
-            return wxString::FromUTF8(e.message.substr(0, colon));
-        return wxString::FromUTF8(e.message.substr(colon + 2));
+        }
+        value = wxString();
     }
+
+    bool SetValueByRow(const wxVariant &, unsigned int, unsigned int) override
+    {
+        return false;
     }
-    return {};
-}
+
+private:
+    LogPanel *owner_;
+};
 
 LogPanel::LogPanel(wxWindow *parent, Elfeed *app)
     : wxPanel(parent, wxID_ANY)
@@ -90,7 +92,23 @@ LogPanel::LogPanel(wxWindow *parent, Elfeed *app)
     hsz->Add(btn_clear, 0, wxALL, FromDIP(4));
     vsz->Add(hsz, 0, wxEXPAND);
 
-    list_ = new LogList(this, this);
+    list_ = new wxDataViewCtrl(this, wxID_ANY,
+                               wxDefaultPosition, wxDefaultSize,
+                               wxDV_ROW_LINES | wxDV_VERT_RULES);
+    model_ = new LogListModel(this);
+    list_->AssociateModel(model_.get());
+
+    const int col_flags = wxDATAVIEW_COL_RESIZABLE |
+                          wxDATAVIEW_COL_REORDERABLE |
+                          wxDATAVIEW_COL_HIDDEN;
+    list_->AppendTextColumn("Time",   0, wxDATAVIEW_CELL_INERT,
+                            FromDIP(140), wxALIGN_LEFT, col_flags);
+    list_->AppendTextColumn("Type",   1, wxDATAVIEW_CELL_INERT,
+                            FromDIP(50),  wxALIGN_LEFT, col_flags);
+    list_->AppendTextColumn("URL",    2, wxDATAVIEW_CELL_INERT,
+                            FromDIP(250), wxALIGN_LEFT, col_flags);
+    list_->AppendTextColumn("Result", 3, wxDATAVIEW_CELL_INERT,
+                            FromDIP(400), wxALIGN_LEFT, col_flags);
     vsz->Add(list_, 1, wxEXPAND);
 
     SetSizer(vsz);
@@ -122,10 +140,12 @@ void LogPanel::refresh()
             if (keep) snapshot_.push_back(e);
         }
     }
-    list_->SetItemCount((long)snapshot_.size());
-    list_->Refresh();
-    if (app_->log_auto_scroll && !snapshot_.empty())
-        list_->EnsureVisible((long)snapshot_.size() - 1);
+    model_->Reset((unsigned int)snapshot_.size());
+    if (app_->log_auto_scroll && !snapshot_.empty()) {
+        wxDataViewItem last = model_->GetItem(
+            (unsigned int)snapshot_.size() - 1);
+        list_->EnsureVisible(last);
+    }
 }
 
 void LogPanel::on_filter_changed(wxCommandEvent &)

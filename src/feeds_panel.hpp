@@ -1,12 +1,12 @@
 #ifndef ELFEED_FEEDS_PANEL_HPP
 #define ELFEED_FEEDS_PANEL_HPP
 
+#include <wx/dataview.h>
 #include <wx/panel.h>
 #include <functional>
 #include "elfeed.hpp"
 
-class wxListCtrl;
-class wxListEvent;
+class FeedsPanelModel;
 
 // wxAUI-dockable panel listing all configured feeds. Double-click a
 // feed to set the filter to `=<feed_url>` (show only that feed).
@@ -21,17 +21,20 @@ public:
     // Re-snapshot from app->feeds and repopulate. UI-thread only.
     void refresh();
 
+    // Snapshot of the rows currently displayed, in display order.
+    // Read by the model; lookup target for the activate event.
+    struct Row { std::string url, title; double updated; };
+
 private:
-    void on_activated(wxListEvent &);
+    void on_activated(wxDataViewEvent &);
 
     Elfeed *app_;
     std::function<void(const std::string &)> on_activate_;
-    wxListCtrl *list_ = nullptr;
+    wxDataViewCtrl *list_ = nullptr;
+    wxObjectDataPtr<FeedsPanelModel> model_;
 
-    // Shadow of the rows currently displayed; parallel to list_ items.
-    // Stored so on_activated can map row index back to a feed URL
-    // regardless of sort order.
-    std::vector<std::string> row_urls_;
+    friend class FeedsPanelModel;
+    std::vector<Row> rows_;
 };
 
 #endif

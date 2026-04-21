@@ -11,7 +11,7 @@ class FeedsPanel;
 class LogPanel;
 class DownloadsPanel;
 class wxSearchCtrl;
-class wxListEvent;
+class wxDataViewEvent;
 class wxAuiManagerEvent;
 
 class MainFrame : public wxFrame {
@@ -56,8 +56,8 @@ private:
     void on_about(wxCommandEvent &);
     void on_quit(wxCommandEvent &);
     void on_close(wxCloseEvent &);
-    void on_list_selected(wxListEvent &);
-    void on_list_activated(wxListEvent &);
+    void on_list_selected(wxDataViewEvent &);
+    void on_list_activated(wxDataViewEvent &);
     void on_list_key(wxKeyEvent &);
     void on_filter_key(wxKeyEvent &);
     void on_pane_close(wxAuiManagerEvent &);
