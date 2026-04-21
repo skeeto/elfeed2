@@ -11,7 +11,7 @@ class FeedsPanelModel : public wxDataViewVirtualListModel {
 public:
     FeedsPanelModel(FeedsPanel *owner) : owner_(owner) {}
 
-    unsigned int GetColumnCount() const override { return 2; }
+    unsigned int GetColumnCount() const override { return 3; }
     wxString GetColumnType(unsigned int) const override { return "string"; }
 
     void GetValueByRow(wxVariant &value,
@@ -20,9 +20,21 @@ public:
     {
         if (row >= owner_->rows_.size()) { value = wxString(); return; }
         const FeedsPanel::Row &r = owner_->rows_[row];
-        if (col == 0)      value = wxString::FromUTF8(r.title);
-        else if (col == 1) value = wxString::FromUTF8(format_date(r.updated));
-        else               value = wxString();
+        if (col == 0) {
+            // Title, with a small trailing arrow if the feed's fetch
+            // URL resolved through a redirect. Users who want to see
+            // the redirect target can enable the Canonical URL
+            // column from the header right-click menu.
+            std::string label = r.title;
+            if (!r.canonical_url.empty()) label += "  ↳";
+            value = wxString::FromUTF8(label);
+        } else if (col == 1) {
+            value = wxString::FromUTF8(format_date(r.updated));
+        } else if (col == 2) {
+            value = wxString::FromUTF8(r.canonical_url);
+        } else {
+            value = wxString();
+        }
     }
 
     bool SetValueByRow(const wxVariant &, unsigned int, unsigned int) override
@@ -54,6 +66,14 @@ FeedsPanel::FeedsPanel(wxWindow *parent, Elfeed *app,
                             FromDIP(200), wxALIGN_LEFT, col_flags);
     list_->AppendTextColumn("Updated", 1, wxDATAVIEW_CELL_INERT,
                             FromDIP(90),  wxALIGN_LEFT, col_flags);
+    // Canonical URL is an advanced/power-user column: most users
+    // don't need to see it. Start hidden; dataview_apply_columns
+    // below restores any user-saved visibility state, and the
+    // right-click header menu exposes the toggle.
+    auto *canonical_col =
+        list_->AppendTextColumn("Canonical URL", 2, wxDATAVIEW_CELL_INERT,
+                                FromDIP(300), wxALIGN_LEFT, col_flags);
+    canonical_col->SetHidden(true);
     dataview_apply_columns(list_, db_load_ui_state(app_, "cols.feeds"));
     sz->Add(list_, 1, wxEXPAND);
     SetSizer(sz);
@@ -88,6 +108,12 @@ void FeedsPanel::refresh()
         r.url = f.url;
         auto it = app_->feed_titles.find(f.url);
         r.title = (it != app_->feed_titles.end()) ? it->second : f.url;
+        // Only surface canonical_url when it actually differs from
+        // the configured URL — avoids redundant "redirects to
+        // itself" noise on feeds where canonical_url got saved
+        // pre-change or matches for unrelated reasons.
+        if (!f.canonical_url.empty() && f.canonical_url != f.url)
+            r.canonical_url = f.canonical_url;
         r.updated = f.last_update;
         rows_.push_back(std::move(r));
     }

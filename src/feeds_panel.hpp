@@ -26,7 +26,14 @@ public:
 
     // Snapshot of the rows currently displayed, in display order.
     // Read by the model; lookup target for the activate event.
-    struct Row { std::string url, title; double updated; };
+    struct Row {
+        std::string url;
+        std::string title;
+        // Populated only when the feed's fetched URL resolved through
+        // a redirect to a different URL. Empty means "no redirect".
+        std::string canonical_url;
+        double updated;
+    };
 
 private:
     void on_activated(wxDataViewEvent &);

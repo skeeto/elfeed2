@@ -172,7 +172,11 @@ bool fetch_process_results(Elfeed *app)
             continue;
         }
 
-        if (r.status_code < 200 || r.status_code >= 400) {
+        // Anything outside 2xx (except 304 above) is an error. That
+        // now includes 3xx — with manual redirect following we can
+        // surface a 301/302/307 to the caller when the redirect chain
+        // hit max_redirects or a server sent 3xx with no Location.
+        if (r.status_code < 200 || r.status_code >= 300) {
             elfeed_log(app, LOG_ERROR, "%s: HTTP %d", r.url.c_str(),
                        r.status_code);
             feed->failures++;
@@ -204,8 +208,17 @@ bool fetch_process_results(Elfeed *app)
             feed->etag = r.etag;
         if (!r.last_modified.empty())
             feed->last_modified = r.last_modified;
-        if (!r.final_url.empty())
+        if (!r.final_url.empty() && r.final_url != r.url) {
+            // Log only when the canonical URL first appears or
+            // changes, so repeated fetches of a stable redirect
+            // chain don't spam the log on every cycle.
+            if (feed->canonical_url != r.final_url) {
+                elfeed_log(app, LOG_INFO,
+                           "%s -> %s (consider updating config)",
+                           r.url.c_str(), r.final_url.c_str());
+            }
             feed->canonical_url = r.final_url;
+        }
         feed->failures = 0;
         feed->last_update = (double)time(nullptr);
         db_update_feed(app, *feed);
