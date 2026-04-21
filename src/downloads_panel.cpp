@@ -48,6 +48,14 @@ public:
         return false;
     }
 
+    // See EntryListModel::Compare — we sort owner_->snapshot_
+    // ourselves, so the backend's native sort must be a no-op.
+    int Compare(const wxDataViewItem &, const wxDataViewItem &,
+                unsigned int, bool) const override
+    {
+        return 0;
+    }
+
 private:
     DownloadsPanel *owner_;
 };

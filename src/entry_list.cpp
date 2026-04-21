@@ -62,6 +62,19 @@ public:
         return false;  // read-only
     }
 
+    // We sort app_->entries ourselves in EntryList::apply_sort, so
+    // the backend's native sort needs to be a no-op. Without this,
+    // wxDataViewVirtualListModel's default implementation reverses
+    // the display for descending sorts (it returns pos2-pos1),
+    // stacking a second sort on top of ours. The display would end
+    // up reverse-ordered from our vector and row+1 advance would
+    // visit rows "at random".
+    int Compare(const wxDataViewItem &, const wxDataViewItem &,
+                unsigned int, bool) const override
+    {
+        return 0;
+    }
+
     bool GetAttrByRow(unsigned int row, unsigned int /*col*/,
                       wxDataViewItemAttr &attr) const override
     {
