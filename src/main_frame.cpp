@@ -13,8 +13,10 @@
 #include <wx/aui/framemanager.h>
 #include <wx/busyinfo.h>
 #include <wx/clipbrd.h>
+#include <wx/aboutdlg.h>
 #include <wx/display.h>
 #include <wx/filedlg.h>
+#include <wx/icon.h>
 #include <wx/menu.h>
 #include <wx/msgdlg.h>
 #include <wx/srchctrl.h>
@@ -37,7 +39,7 @@ enum {
 };
 
 MainFrame::MainFrame(Elfeed *app)
-    : wxFrame(nullptr, wxID_ANY, "elfeed2",
+    : wxFrame(nullptr, wxID_ANY, "Elfeed2",
               wxDefaultPosition, wxDefaultSize)
     , app_(app)
 {
@@ -77,6 +79,19 @@ MainFrame::MainFrame(Elfeed *app)
         Centre();
     }
     normal_rect_ = wxRect(GetPosition(), GetSize());
+
+    // Title-bar / taskbar icon. wxICON() expands to:
+    //   Windows: wxIcon("elfeed2") which loads the named ICON
+    //            resource embedded by elfeed2.rc.
+    //   GTK:     wxIcon(elfeed2_xpm) — needs an XPM symbol; we
+    //            don't ship one yet, so the macro yields nothing.
+    //   macOS:   no-op; the bundle's CFBundleIconFile is the
+    //            single source of truth for app iconography.
+    // Wrapped in #ifdef so non-Windows builds don't error on the
+    // missing XPM symbol.
+#ifdef __WXMSW__
+    SetIcon(wxICON(elfeed2));
+#endif
 
     build_menus();
     build_widgets();
@@ -586,8 +601,35 @@ void MainFrame::on_reset_layout(wxCommandEvent &)
 
 void MainFrame::on_about(wxCommandEvent &)
 {
-    wxMessageBox("elfeed2 " ELFEED_VERSION "\n\nA feed reader.",
-                 "About elfeed2", wxOK | wxICON_INFORMATION, this);
+    // Generic wxAboutDialog (rather than the macOS native panel)
+    // because we want the WebSite link to be clickable and the
+    // License section to be scrollable. wxAboutBox auto-routes to
+    // the generic dialog whenever any of those richer fields are
+    // populated, which is what we want here.
+    wxAboutDialogInfo info;
+    info.SetName("Elfeed2");
+    info.SetVersion(ELFEED_VERSION);
+    info.SetDescription(
+        wxT("A standalone feed reader, successor to Emacs Elfeed."));
+    info.SetCopyright(wxT("Public Domain (Unlicense)"));
+    info.SetWebSite("https://github.com/skeeto/elfeed2",
+                    "github.com/skeeto/elfeed2");
+    // The "License" tab/section lists bundled third-party
+    // components and their licenses. Useful for users verifying
+    // redistribution constraints. Versions match what CMakeLists
+    // pulls via FetchContent — keep them in sync if those bump.
+    info.SetLicense(wxT(
+        "Elfeed2 is released into the public domain.\n"
+        "See https://unlicense.org/ for details.\n"
+        "\n"
+        "Bundled third-party components:\n"
+        "\n"
+        "  wxWidgets 3.2.10        wxWindows Library Licence\n"
+        "  cpp-httplib 0.43.0      MIT\n"
+        "  mbedTLS 3.6.2           Apache License 2.0\n"
+        "  pugixml 1.14            MIT\n"
+        "  SQLite 3.49.1           Public Domain\n"));
+    wxAboutBox(info, this);
 }
 
 void MainFrame::on_quit(wxCommandEvent &)

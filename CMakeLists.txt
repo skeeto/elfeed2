@@ -173,10 +173,26 @@ set(elfeed_sources
   src/elfeed_import.cpp
 )
 if(WIN32)
-  list(APPEND elfeed_sources src/http_win.cpp src/elfeed2.rc)
+  # Configure the .rc from a template so PROJECT_VERSION (and its
+  # MAJOR/MINOR/PATCH split) drives both the VERSIONINFO numeric
+  # tuples and the StringFileInfo "FileVersion" / "ProductVersion"
+  # display strings — no manual sync between CMakeLists and the rc.
+  set(elfeed2_rc_in  "${CMAKE_CURRENT_SOURCE_DIR}/src/elfeed2.rc.in")
+  set(elfeed2_rc_out "${CMAKE_CURRENT_BINARY_DIR}/src/elfeed2.rc")
+  configure_file("${elfeed2_rc_in}" "${elfeed2_rc_out}" @ONLY)
+  list(APPEND elfeed_sources src/http_win.cpp "${elfeed2_rc_out}")
   enable_language(RC)
 else()
   list(APPEND elfeed_sources src/http_posix.cpp)
+endif()
+
+if(APPLE)
+  # The .icns file ships inside the bundle's Resources directory and
+  # is referenced via CFBundleIconFile. Mark it as a resource on the
+  # target so CMake places it at the right path.
+  list(APPEND elfeed_sources src/elfeed2.icns)
+  set_source_files_properties(src/elfeed2.icns PROPERTIES
+    MACOSX_PACKAGE_LOCATION "Resources")
 endif()
 
 add_executable(elfeed2 WIN32 MACOSX_BUNDLE ${elfeed_sources})
@@ -188,20 +204,36 @@ if(APPLE)
   # the bundle ID. CMake's built-in MacOSXBundleInfo.plist.in template
   # isn't always found under Ninja; provide our own so we're certain.
   set_target_properties(elfeed2 PROPERTIES
-    MACOSX_BUNDLE_INFO_PLIST          "${CMAKE_CURRENT_SOURCE_DIR}/src/Info.plist.in"
-    MACOSX_BUNDLE_GUI_IDENTIFIER      "com.nullprogram.elfeed2"
-    MACOSX_BUNDLE_BUNDLE_NAME         "elfeed2"
-    MACOSX_BUNDLE_BUNDLE_VERSION      "${PROJECT_VERSION}"
+    MACOSX_BUNDLE_INFO_PLIST           "${CMAKE_CURRENT_SOURCE_DIR}/src/Info.plist.in"
+    MACOSX_BUNDLE_GUI_IDENTIFIER       "com.nullprogram.elfeed2"
+    # Icon file (no extension here — the plist template adds .icns).
+    MACOSX_BUNDLE_ICON_FILE            "elfeed2"
+    # CFBundleName is what macOS shows in the menu bar when this
+    # app is active; capitalize for display. The internal binary
+    # name (CFBundleExecutable) stays lowercase via the target
+    # name "elfeed2", matching paths and SetAppName().
+    MACOSX_BUNDLE_BUNDLE_NAME          "Elfeed2"
+    MACOSX_BUNDLE_BUNDLE_VERSION       "${PROJECT_VERSION}"
     MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
+    MACOSX_BUNDLE_LONG_VERSION_STRING  "${PROJECT_VERSION}"
+    # Surfaces in Finder's Get Info > Copyright row, and the
+    # generic About dialog wxAboutBox shows on macOS.
+    MACOSX_BUNDLE_COPYRIGHT            "Public Domain (Unlicense)"
+    # Old-style "Get Info" string. Some Spotlight tooling reads
+    # this; keeping it set is cheap insurance.
+    MACOSX_BUNDLE_INFO_STRING          "Elfeed2 ${PROJECT_VERSION}, Public Domain"
   )
 endif()
 
 if(WIN32)
-  # The RC compiler runs from the build dir; make it find the manifest
-  # next to the .rc file, and rebuild when the manifest changes.
-  set_source_files_properties(src/elfeed2.rc PROPERTIES
+  # The RC compiler runs from the build dir; point it at src/ so the
+  # `#include "wx/msw/wx.rc"` and the `1 24 "elfeed2.manifest"`
+  # relative-path reference both resolve. Rebuild on manifest or .in
+  # changes too.
+  set_source_files_properties("${elfeed2_rc_out}" PROPERTIES
     INCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}/src"
-    OBJECT_DEPENDS      "${CMAKE_CURRENT_SOURCE_DIR}/src/elfeed2.manifest"
+    OBJECT_DEPENDS
+      "${CMAKE_CURRENT_SOURCE_DIR}/src/elfeed2.manifest;${CMAKE_CURRENT_SOURCE_DIR}/src/elfeed2.ico;${elfeed2_rc_in}"
   )
 endif()
 

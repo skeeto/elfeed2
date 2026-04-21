@@ -163,8 +163,8 @@ bool ElfeedApp::OnInit()
     instance_checker_ = std::make_unique<wxSingleInstanceChecker>(
         "elfeed2-" + wxGetUserId());
     if (instance_checker_->IsAnotherRunning()) {
-        wxMessageBox("Another elfeed2 instance is already running.",
-                     "elfeed2", wxOK | wxICON_INFORMATION);
+        wxMessageBox("Another Elfeed2 instance is already running.",
+                     "Elfeed2", wxOK | wxICON_INFORMATION);
         instance_checker_.reset();
         return false;
     }
