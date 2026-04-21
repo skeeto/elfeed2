@@ -350,3 +350,48 @@ void dataview_show_column_menu(wxDataViewCtrl *ctrl,
               });
     ctrl->PopupMenu(&menu);
 }
+
+// ---- wxDataViewCtrl sort persistence -----------------------------
+
+DataViewSort dataview_current_sort(wxDataViewCtrl *ctrl)
+{
+    DataViewSort out;
+    for (unsigned i = 0; i < ctrl->GetColumnCount(); i++) {
+        auto *col = ctrl->GetColumn(i);
+        if (col->IsSortKey()) {
+            out.col = (int)col->GetModelColumn();
+            out.ascending = col->IsSortOrderAscending();
+            return out;
+        }
+    }
+    return out;
+}
+
+std::string dataview_serialize_sort(wxDataViewCtrl *ctrl)
+{
+    DataViewSort s = dataview_current_sort(ctrl);
+    if (s.col < 0) return {};
+    return std::to_string(s.col) + (s.ascending ? ",asc" : ",desc");
+}
+
+void dataview_apply_sort(wxDataViewCtrl *ctrl, const std::string &saved)
+{
+    if (saved.empty()) return;
+    size_t comma = saved.find(',');
+    if (comma == std::string::npos) return;
+    int model_col = atoi(saved.substr(0, comma).c_str());
+    bool asc = saved.substr(comma + 1) != "desc";
+
+    // Clear any existing sort key, then set the one we want. wx uses
+    // SetSortOrder(false) to mean "descending but sorted"; a null sort
+    // (no key at all) is expressed via UnsetAsSortKey().
+    for (unsigned i = 0; i < ctrl->GetColumnCount(); i++)
+        ctrl->GetColumn(i)->UnsetAsSortKey();
+    for (unsigned i = 0; i < ctrl->GetColumnCount(); i++) {
+        auto *col = ctrl->GetColumn(i);
+        if ((int)col->GetModelColumn() == model_col) {
+            col->SetSortOrder(asc);
+            break;
+        }
+    }
+}

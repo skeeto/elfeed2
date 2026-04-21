@@ -65,6 +65,24 @@ void dataview_apply_columns(wxDataViewCtrl *ctrl, const std::string &saved);
 void dataview_show_column_menu(wxDataViewCtrl *ctrl,
                                const std::function<void()> &on_change);
 
+// ---- wxDataViewCtrl sort persistence ----
+
+// Current sort state, by model column index. col = -1 means no
+// column is marked as the sort key (insertion / natural order).
+struct DataViewSort {
+    int  col = -1;
+    bool ascending = true;
+};
+
+// Snapshot / restore the active sort key. Virtual list models don't
+// sort themselves; the panel is expected to watch
+// wxEVT_DATAVIEW_COLUMN_SORTED, read this state, re-order its
+// backing vector, and call Reset() on its model.
+DataViewSort dataview_current_sort(wxDataViewCtrl *ctrl);
+std::string  dataview_serialize_sort(wxDataViewCtrl *ctrl);
+void         dataview_apply_sort(wxDataViewCtrl *ctrl,
+                                 const std::string &saved);
+
 // ---- Time formatting (local time) ----
 
 // Format `epoch` (Unix seconds, UTC) as local-time strings. Returns an

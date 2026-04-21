@@ -91,10 +91,11 @@ EntryList::EntryList(wxWindow *parent, Elfeed *app)
 
     // wxDATAVIEW_COL_HIDDEN is a STATE flag — setting it at construction
     // would make every column start hidden. We just want resizable +
-    // reorderable; visibility is handled by the right-click menu we
-    // pop ourselves below.
+    // reorderable + sortable; visibility is handled by the right-click
+    // menu we pop ourselves below.
     const int col_flags = wxDATAVIEW_COL_RESIZABLE |
-                          wxDATAVIEW_COL_REORDERABLE;
+                          wxDATAVIEW_COL_REORDERABLE |
+                          wxDATAVIEW_COL_SORTABLE;
 
     AppendTextColumn("Date",  0, wxDATAVIEW_CELL_INERT,
                      FromDIP(90),  wxALIGN_LEFT, col_flags);
@@ -105,8 +106,9 @@ EntryList::EntryList(wxWindow *parent, Elfeed *app)
     AppendTextColumn("Tags",  3, wxDATAVIEW_CELL_INERT,
                      FromDIP(120), wxALIGN_LEFT, col_flags);
 
-    // Restore saved column widths/visibility from the DB.
+    // Restore saved column widths/visibility and sort state from DB.
     dataview_apply_columns(this, db_load_ui_state(app_, "cols.entry_list"));
+    dataview_apply_sort(this, db_load_ui_state(app_, "sort.entry_list"));
 
     // Provide our own column-visibility menu — wxDataViewCtrl exposes
     // the right-click event but doesn't pop a menu by default.
@@ -114,6 +116,76 @@ EntryList::EntryList(wxWindow *parent, Elfeed *app)
          [this](wxDataViewEvent &) {
              dataview_show_column_menu(this, [this] { save_columns(); });
          });
+    Bind(wxEVT_DATAVIEW_COLUMN_SORTED, &EntryList::on_sort, this);
+}
+
+static int ci_compare(const std::string &a, const std::string &b)
+{
+    size_t n = std::min(a.size(), b.size());
+    for (size_t i = 0; i < n; i++) {
+        int ca = std::tolower((unsigned char)a[i]);
+        int cb = std::tolower((unsigned char)b[i]);
+        if (ca != cb) return ca - cb;
+    }
+    if (a.size() < b.size()) return -1;
+    if (a.size() > b.size()) return 1;
+    return 0;
+}
+
+void EntryList::apply_sort()
+{
+    DataViewSort s = dataview_current_sort(this);
+    // Default: keep the SQL order (date DESC). That's the "recent
+    // first" view users expect when they haven't chosen a sort.
+    if (s.col < 0) return;
+
+    // Stable sort so equal rows keep their date-DESC order as a
+    // tiebreak — meaningful for Tags/Feed sorts where many entries
+    // share the key. Preserves intuitive "within this group, newer
+    // first" behavior at no cost.
+    auto *app = app_;
+    std::stable_sort(
+        app->entries.begin(), app->entries.end(),
+        [col = s.col, asc = s.ascending, app]
+        (const Entry &a, const Entry &b) {
+            int c = 0;
+            switch (col) {
+            case 0:
+                if (a.date != b.date) c = a.date < b.date ? -1 : 1;
+                break;
+            case 1:
+                c = ci_compare(html_strip(a.title), html_strip(b.title));
+                break;
+            case 2: {
+                auto at = app->feed_titles.find(a.feed_url);
+                auto bt = app->feed_titles.find(b.feed_url);
+                const std::string &as = at != app->feed_titles.end()
+                                            ? at->second : a.feed_url;
+                const std::string &bs = bt != app->feed_titles.end()
+                                            ? bt->second : b.feed_url;
+                c = ci_compare(as, bs);
+                break;
+            }
+            case 3: {
+                // Join tags for a stable lex compare; small and
+                // cheap for the typical 0–4 tags per entry.
+                std::string ta, tb;
+                for (auto &t : a.tags) { ta += t; ta += ','; }
+                for (auto &t : b.tags) { tb += t; tb += ','; }
+                c = ci_compare(ta, tb);
+                break;
+            }
+            }
+            return asc ? c < 0 : c > 0;
+        });
+}
+
+void EntryList::on_sort(wxDataViewEvent &)
+{
+    apply_sort();
+    model_->Reset((unsigned int)app_->entries.size());
+    db_save_ui_state(app_, "sort.entry_list",
+                     dataview_serialize_sort(this).c_str());
 }
 
 void EntryList::save_columns()
@@ -124,6 +196,9 @@ void EntryList::save_columns()
 
 void EntryList::refresh_items()
 {
+    // Re-apply current sort in case the new query results came back
+    // in DB order (date DESC) but the user has a custom sort active.
+    apply_sort();
     model_->Reset((unsigned int)app_->entries.size());
 }
 

@@ -36,7 +36,14 @@ public:
     // app close.
     void save_columns();
 
+    // Re-sort app->entries according to the current column header
+    // sort state. Called from refresh_items so new query results
+    // land in the expected order.
+    void apply_sort();
+
 private:
+    void on_sort(wxDataViewEvent &);
+
     Elfeed *app_;
     wxObjectDataPtr<EntryListModel> model_;
 };

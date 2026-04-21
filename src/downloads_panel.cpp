@@ -73,7 +73,8 @@ DownloadsPanel::DownloadsPanel(wxWindow *parent, Elfeed *app)
     list_->AssociateModel(model_.get());
 
     const int col_flags = wxDATAVIEW_COL_RESIZABLE |
-                          wxDATAVIEW_COL_REORDERABLE;
+                          wxDATAVIEW_COL_REORDERABLE |
+                          wxDATAVIEW_COL_SORTABLE;
     list_->AppendTextColumn("%",     0, wxDATAVIEW_CELL_INERT,
                             FromDIP(80),  wxALIGN_LEFT, col_flags);
     list_->AppendTextColumn("Size",  1, wxDATAVIEW_CELL_INERT,
@@ -83,11 +84,14 @@ DownloadsPanel::DownloadsPanel(wxWindow *parent, Elfeed *app)
     list_->AppendTextColumn("Fails", 3, wxDATAVIEW_CELL_INERT,
                             FromDIP(50),  wxALIGN_LEFT, col_flags);
     dataview_apply_columns(list_, db_load_ui_state(app_, "cols.downloads"));
+    dataview_apply_sort(list_, db_load_ui_state(app_, "sort.downloads"));
     list_->Bind(wxEVT_DATAVIEW_COLUMN_HEADER_RIGHT_CLICK,
                 [this](wxDataViewEvent &) {
                     dataview_show_column_menu(list_,
                                               [this] { save_columns(); });
                 });
+    list_->Bind(wxEVT_DATAVIEW_COLUMN_SORTED,
+                &DownloadsPanel::on_sort, this);
     vsz->Add(list_, 1, wxEXPAND);
 
     SetSizer(vsz);
@@ -96,6 +100,63 @@ DownloadsPanel::DownloadsPanel(wxWindow *parent, Elfeed *app)
     btn_remove_->Bind(wxEVT_BUTTON, &DownloadsPanel::on_remove, this);
 
     refresh();
+}
+
+static int ci_cmp_dl(const std::string &a, const std::string &b)
+{
+    size_t n = std::min(a.size(), b.size());
+    for (size_t i = 0; i < n; i++) {
+        int ca = std::tolower((unsigned char)a[i]);
+        int cb = std::tolower((unsigned char)b[i]);
+        if (ca != cb) return ca - cb;
+    }
+    if (a.size() < b.size()) return -1;
+    if (a.size() > b.size()) return 1;
+    return 0;
+}
+
+// Extract the leading number from a progress or size string like
+// "73.4%" or "114.29MiB". Used for numeric sort on columns whose
+// display text is not straight numeric.
+static double parse_leading_number(const std::string &s)
+{
+    size_t i = 0;
+    while (i < s.size() && std::isspace((unsigned char)s[i])) i++;
+    size_t start = i;
+    while (i < s.size() && (std::isdigit((unsigned char)s[i]) ||
+                            s[i] == '.' || s[i] == '-'))
+        i++;
+    if (i == start) return 0;
+    try { return std::stod(s.substr(start, i - start)); }
+    catch (...) { return 0; }
+}
+
+void DownloadsPanel::apply_sort()
+{
+    DataViewSort s = dataview_current_sort(list_);
+    if (s.col < 0) return;  // insertion order — handled elsewhere
+    std::stable_sort(
+        snapshot_.begin(), snapshot_.end(),
+        [col = s.col, asc = s.ascending](const Row &a, const Row &b) {
+            int c = 0;
+            switch (col) {
+            case 0:
+                c = (int)(parse_leading_number(a.progress) -
+                          parse_leading_number(b.progress) > 0) -
+                    (int)(parse_leading_number(a.progress) -
+                          parse_leading_number(b.progress) < 0);
+                break;
+            case 1: {
+                double na = parse_leading_number(a.total);
+                double nb = parse_leading_number(b.total);
+                if (na != nb) c = na < nb ? -1 : 1;
+                break;
+            }
+            case 2: c = ci_cmp_dl(a.name, b.name); break;
+            case 3: c = a.failures - b.failures;  break;
+            }
+            return asc ? c < 0 : c > 0;
+        });
 }
 
 void DownloadsPanel::refresh()
@@ -116,10 +177,24 @@ void DownloadsPanel::refresh()
         new_snap.push_back(std::move(r));
     }
 
-    // Differential update so selection and scroll position survive
-    // the frequent progress-driven refreshes. download.cpp doesn't
-    // reorder app->downloads (only push_back for new, erase for
-    // finished), so old and new snapshots are aligned subsequences.
+    // If the user has picked a column header sort, the differential
+    // update below doesn't apply (snapshot_ and new_snap don't stay
+    // aligned — rows reorder as progress ticks change their rank).
+    // Fall back to the simple rebuild path in that case. For the
+    // "no sort" (insertion order) default we keep the differential
+    // update so selection and scroll survive frequent refreshes.
+    DataViewSort sort = dataview_current_sort(list_);
+    if (sort.col >= 0) {
+        snapshot_ = std::move(new_snap);
+        apply_sort();
+        model_->Reset((unsigned int)snapshot_.size());
+        return;
+    }
+
+    // Differential update path (default order):
+    // download.cpp doesn't reorder app->downloads (only push_back for
+    // new, erase for finished), so old and new snapshots are aligned
+    // subsequences.
 
     // Phase 1: remove rows whose id is gone. Walk backward so prior
     // indices stay valid as we delete.
@@ -145,6 +220,14 @@ void DownloadsPanel::refresh()
             model_->RowChanged((unsigned int)i);
         }
     }
+}
+
+void DownloadsPanel::on_sort(wxDataViewEvent &)
+{
+    apply_sort();
+    model_->Reset((unsigned int)snapshot_.size());
+    db_save_ui_state(app_, "sort.downloads",
+                     dataview_serialize_sort(list_).c_str());
 }
 
 void DownloadsPanel::on_pause(wxCommandEvent &)

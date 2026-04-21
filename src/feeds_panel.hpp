@@ -39,6 +39,11 @@ private:
     void on_activated(wxDataViewEvent &);
     void on_context_menu(wxDataViewEvent &);
     void on_key(wxKeyEvent &);
+    void on_sort(wxDataViewEvent &);
+
+    // Sort rows_ in place by the current column header sort state.
+    // Called from refresh() and the column-sorted event handler.
+    void apply_sort();
 
     // Copy `text` to the clipboard and flash a status line so the user
     // has some feedback that something happened. Returns false if the

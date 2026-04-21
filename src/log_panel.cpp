@@ -99,7 +99,8 @@ LogPanel::LogPanel(wxWindow *parent, Elfeed *app)
     list_->AssociateModel(model_.get());
 
     const int col_flags = wxDATAVIEW_COL_RESIZABLE |
-                          wxDATAVIEW_COL_REORDERABLE;
+                          wxDATAVIEW_COL_REORDERABLE |
+                          wxDATAVIEW_COL_SORTABLE;
     list_->AppendTextColumn("Time",   0, wxDATAVIEW_CELL_INERT,
                             FromDIP(140), wxALIGN_LEFT, col_flags);
     list_->AppendTextColumn("Type",   1, wxDATAVIEW_CELL_INERT,
@@ -109,11 +110,14 @@ LogPanel::LogPanel(wxWindow *parent, Elfeed *app)
     list_->AppendTextColumn("Result", 3, wxDATAVIEW_CELL_INERT,
                             FromDIP(400), wxALIGN_LEFT, col_flags);
     dataview_apply_columns(list_, db_load_ui_state(app_, "cols.log"));
+    dataview_apply_sort(list_, db_load_ui_state(app_, "sort.log"));
     list_->Bind(wxEVT_DATAVIEW_COLUMN_HEADER_RIGHT_CLICK,
                 [this](wxDataViewEvent &) {
                     dataview_show_column_menu(list_,
                                               [this] { save_columns(); });
                 });
+    list_->Bind(wxEVT_DATAVIEW_COLUMN_SORTED,
+                &LogPanel::on_sort, this);
     vsz->Add(list_, 1, wxEXPAND);
 
     SetSizer(vsz);
@@ -126,6 +130,62 @@ LogPanel::LogPanel(wxWindow *parent, Elfeed *app)
     btn_clear->Bind(wxEVT_BUTTON, &LogPanel::on_clear, this);
 
     refresh();
+}
+
+static int ci_compare_str(const std::string &a, const std::string &b)
+{
+    size_t n = std::min(a.size(), b.size());
+    for (size_t i = 0; i < n; i++) {
+        int ca = std::tolower((unsigned char)a[i]);
+        int cb = std::tolower((unsigned char)b[i]);
+        if (ca != cb) return ca - cb;
+    }
+    if (a.size() < b.size()) return -1;
+    if (a.size() > b.size()) return 1;
+    return 0;
+}
+
+void LogPanel::apply_sort()
+{
+    DataViewSort s = dataview_current_sort(list_);
+    // Default: leave chronological order untouched. Auto-scroll
+    // below relies on the last row being the newest message.
+    if (s.col < 0) return;
+    std::stable_sort(
+        snapshot_.begin(), snapshot_.end(),
+        [col = s.col, asc = s.ascending]
+        (const LogEntry &a, const LogEntry &b) {
+            int c = 0;
+            switch (col) {
+            case 0:
+                if (a.time != b.time) c = a.time < b.time ? -1 : 1;
+                break;
+            case 1:
+                // LogKind enum order already reflects severity
+                // roughly; numeric compare is cheap and stable.
+                c = (int)a.kind - (int)b.kind;
+                break;
+            case 2: // URL and Result share the message string, split
+            case 3: // on the first ": " — same split the model does.
+            {
+                auto ca = a.message.find(": ");
+                auto cb = b.message.find(": ");
+                std::string as = (col == 2 && ca != std::string::npos)
+                    ? a.message.substr(0, ca)
+                    : (ca != std::string::npos
+                        ? a.message.substr(ca + 2) : a.message);
+                std::string bs = (col == 2 && cb != std::string::npos)
+                    ? b.message.substr(0, cb)
+                    : (cb != std::string::npos
+                        ? b.message.substr(cb + 2) : b.message);
+                if (col != 2 && ca == std::string::npos) as = {};
+                if (col != 2 && cb == std::string::npos) bs = {};
+                c = ci_compare_str(as, bs);
+                break;
+            }
+            }
+            return asc ? c < 0 : c > 0;
+        });
 }
 
 void LogPanel::refresh()
@@ -145,12 +205,26 @@ void LogPanel::refresh()
             if (keep) snapshot_.push_back(e);
         }
     }
+    apply_sort();
     model_->Reset((unsigned int)snapshot_.size());
-    if (app_->log_auto_scroll && !snapshot_.empty()) {
+    // Auto-scroll only makes sense when the newest message is last —
+    // i.e. chronological (no sort, or Time ascending). For other
+    // orderings we'd fight the user; leave scroll where it is.
+    DataViewSort s = dataview_current_sort(list_);
+    bool chronological = (s.col < 0) || (s.col == 0 && s.ascending);
+    if (app_->log_auto_scroll && chronological && !snapshot_.empty()) {
         wxDataViewItem last = model_->GetItem(
             (unsigned int)snapshot_.size() - 1);
         list_->EnsureVisible(last);
     }
+}
+
+void LogPanel::on_sort(wxDataViewEvent &)
+{
+    apply_sort();
+    model_->Reset((unsigned int)snapshot_.size());
+    db_save_ui_state(app_, "sort.log",
+                     dataview_serialize_sort(list_).c_str());
 }
 
 void LogPanel::on_filter_changed(wxCommandEvent &)

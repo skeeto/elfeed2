@@ -64,7 +64,8 @@ FeedsPanel::FeedsPanel(wxWindow *parent, Elfeed *app,
     list_->AssociateModel(model_.get());
 
     const int col_flags = wxDATAVIEW_COL_RESIZABLE |
-                          wxDATAVIEW_COL_REORDERABLE;
+                          wxDATAVIEW_COL_REORDERABLE |
+                          wxDATAVIEW_COL_SORTABLE;
     list_->AppendTextColumn("Title",   0, wxDATAVIEW_CELL_INERT,
                             FromDIP(200), wxALIGN_LEFT, col_flags);
     list_->AppendTextColumn("Updated", 1, wxDATAVIEW_CELL_INERT,
@@ -78,6 +79,7 @@ FeedsPanel::FeedsPanel(wxWindow *parent, Elfeed *app,
                                 FromDIP(300), wxALIGN_LEFT, col_flags);
     canonical_col->SetHidden(true);
     dataview_apply_columns(list_, db_load_ui_state(app_, "cols.feeds"));
+    dataview_apply_sort(list_, db_load_ui_state(app_, "sort.feeds"));
     sz->Add(list_, 1, wxEXPAND);
     SetSizer(sz);
 
@@ -91,8 +93,64 @@ FeedsPanel::FeedsPanel(wxWindow *parent, Elfeed *app,
     list_->Bind(wxEVT_DATAVIEW_ITEM_CONTEXT_MENU,
                 &FeedsPanel::on_context_menu, this);
     list_->Bind(wxEVT_CHAR_HOOK, &FeedsPanel::on_key, this);
+    list_->Bind(wxEVT_DATAVIEW_COLUMN_SORTED,
+                &FeedsPanel::on_sort, this);
 
     refresh();
+}
+
+// Lowercase compare so "apple" sorts next to "Apple" rather than
+// after all uppercase entries. Kept local to avoid pulling in a
+// locale-collator dependency.
+static int ci_compare(const std::string &a, const std::string &b)
+{
+    size_t n = std::min(a.size(), b.size());
+    for (size_t i = 0; i < n; i++) {
+        int ca = std::tolower((unsigned char)a[i]);
+        int cb = std::tolower((unsigned char)b[i]);
+        if (ca != cb) return ca - cb;
+    }
+    if (a.size() < b.size()) return -1;
+    if (a.size() > b.size()) return 1;
+    return 0;
+}
+
+void FeedsPanel::apply_sort()
+{
+    DataViewSort s = dataview_current_sort(list_);
+    // No explicit sort → default to title ascending, matching our
+    // pre-sortable-headers behavior (most users expect to scan
+    // feeds alphabetically).
+    int col = s.col < 0 ? 0 : s.col;
+    bool asc = s.col < 0 ? true : s.ascending;
+
+    std::sort(rows_.begin(), rows_.end(),
+              [col, asc](const Row &a, const Row &b) {
+                  int c = 0;
+                  switch (col) {
+                  case 0: c = ci_compare(a.title, b.title); break;
+                  case 1:
+                      // Numeric compare on epoch; ties fall back to
+                      // title so the order is deterministic.
+                      if (a.updated != b.updated)
+                          c = a.updated < b.updated ? -1 : 1;
+                      else
+                          c = ci_compare(a.title, b.title);
+                      break;
+                  case 2: c = ci_compare(a.canonical_url, b.canonical_url);
+                          break;
+                  default: c = 0;
+                  }
+                  return asc ? c < 0 : c > 0;
+              });
+}
+
+void FeedsPanel::on_sort(wxDataViewEvent &)
+{
+    apply_sort();
+    model_->Reset((unsigned int)rows_.size());
+    db_save_ui_state(app_, "sort.feeds",
+                     dataview_serialize_sort(list_).c_str());
 }
 
 const FeedsPanel::Row *FeedsPanel::selected_row() const
@@ -222,18 +280,7 @@ void FeedsPanel::refresh()
         rows_.push_back(std::move(r));
     }
 
-    std::sort(rows_.begin(), rows_.end(),
-              [](const Row &a, const Row &b) {
-                  // Case-insensitive title sort
-                  size_t n = std::min(a.title.size(), b.title.size());
-                  for (size_t i = 0; i < n; i++) {
-                      int ca = std::tolower((unsigned char)a.title[i]);
-                      int cb = std::tolower((unsigned char)b.title[i]);
-                      if (ca != cb) return ca < cb;
-                  }
-                  return a.title.size() < b.title.size();
-              });
-
+    apply_sort();
     model_->Reset((unsigned int)rows_.size());
 }
 
