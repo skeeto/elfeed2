@@ -24,6 +24,11 @@ public:
     // Persist current column widths/visibility into the DB.
     void save_columns();
 
+    // Reset column widths, visibility, and sort to construction
+    // defaults, and clear the persisted state so nothing comes back
+    // on next launch. Refreshes the view in-place.
+    void reset_layout();
+
     // Snapshot of the rows currently displayed, in display order.
     // Read by the model; lookup target for the activate event.
     struct Row {
@@ -59,8 +64,23 @@ private:
     wxDataViewCtrl *list_ = nullptr;
     wxObjectDataPtr<FeedsPanelModel> model_;
 
+    // Append one column at construction-time defaults, by title. Used
+    // both on first build and on reset_layout. Encapsulates the
+    // per-title width/flags/hidden knowledge so column ordering can
+    // be restored from DB state.
+    void append_column(const wxString &title);
+    // Clear + re-append columns in the given title order. Titles not
+    // recognized are skipped; defaults not listed get appended last
+    // so the user always sees every known column.
+    void build_columns(const std::vector<std::string> &order);
+
     friend class FeedsPanelModel;
     std::vector<Row> rows_;
+
+    // Default column order at construction time. Also serves as the
+    // reset target for reset_layout() and the fallback completion
+    // list when a saved order omits a column we now know about.
+    std::vector<std::string> default_order_;
 };
 
 #endif

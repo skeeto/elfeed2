@@ -51,13 +51,21 @@ std::string user_home_dir();
 // ---- wxDataViewCtrl column persistence ----
 
 // Serialize each column's title, current width, and hidden state into
-// a single string. Round-tripped via dataview_apply_columns.
+// a single string. Entries appear in display-position order (which
+// reflects any user drag-reordering), so the round-trip through
+// dataview_apply_columns + a panel-side rebuild preserves ordering.
 std::string dataview_serialize_columns(wxDataViewCtrl *ctrl);
 
-// Apply a previously-serialized column state to `ctrl`. Columns absent
-// from `saved` keep their construction defaults; columns in `saved`
-// that no longer exist in the control are ignored.
+// Apply a previously-serialized column state to `ctrl`. Only widths
+// and hidden flags are applied here; panels that want to restore
+// display order use dataview_parse_column_order to get titles in
+// order and ClearColumns + re-append in that order.
 void dataview_apply_columns(wxDataViewCtrl *ctrl, const std::string &saved);
+
+// Parse just the column titles from a serialized cols string, in
+// display order. Empty result if `saved` is empty or unparseable.
+std::vector<std::string>
+dataview_parse_column_order(const std::string &saved);
 
 // Pop up a context menu listing each column with a checkbox for its
 // visibility. Toggling an item flips the column's hidden state and

@@ -284,9 +284,24 @@ double parse_rfc822(const std::string &s)
 
 std::string dataview_serialize_columns(wxDataViewCtrl *ctrl)
 {
-    std::string out;
-    for (unsigned i = 0; i < ctrl->GetColumnCount(); i++) {
+    // Emit columns in display order (which can differ from model
+    // order if the user drag-reordered). GetColumnPosition is the
+    // portable way to ask "where does this column show on screen?".
+    unsigned n = ctrl->GetColumnCount();
+    std::vector<std::pair<int, wxDataViewColumn *>> by_pos;
+    by_pos.reserve(n);
+    for (unsigned i = 0; i < n; i++) {
         auto *col = ctrl->GetColumn(i);
+        by_pos.push_back({ctrl->GetColumnPosition(col), col});
+    }
+    std::sort(by_pos.begin(), by_pos.end(),
+              [](const auto &a, const auto &b) {
+                  return a.first < b.first;
+              });
+
+    std::string out;
+    for (auto &[pos, col] : by_pos) {
+        (void)pos;
         if (!out.empty()) out += ',';
         out += col->GetTitle().utf8_string();
         out += '=';
@@ -295,6 +310,23 @@ std::string dataview_serialize_columns(wxDataViewCtrl *ctrl)
         out += col->IsHidden() ? '1' : '0';
     }
     return out;
+}
+
+std::vector<std::string>
+dataview_parse_column_order(const std::string &saved)
+{
+    std::vector<std::string> titles;
+    size_t pos = 0;
+    while (pos < saved.size()) {
+        size_t comma = saved.find(',', pos);
+        if (comma == std::string::npos) comma = saved.size();
+        std::string item = saved.substr(pos, comma - pos);
+        pos = comma + 1;
+        auto eq = item.find('=');
+        if (eq == std::string::npos) continue;
+        titles.push_back(item.substr(0, eq));
+    }
+    return titles;
 }
 
 void dataview_apply_columns(wxDataViewCtrl *ctrl, const std::string &saved)

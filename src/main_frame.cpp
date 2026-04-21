@@ -528,14 +528,25 @@ void MainFrame::on_toggle_downloads(wxCommandEvent &) { toggle_pane("downloads")
 
 void MainFrame::on_reset_layout(wxCommandEvent &)
 {
-    // Restore the perspective captured at construction. Persist it
-    // immediately so a later crash before on_close can't bring back
-    // the old customised layout.
-    if (default_perspective_.empty()) return;
-    mgr_.LoadPerspective(default_perspective_, false);
-    mgr_.Update();
-    db_save_ui_state(app_, "layout",
-                     default_perspective_.utf8_string().c_str());
+    // Reset every "layout" concern: AUI perspective, per-panel
+    // column widths/visibility, per-panel sort state. Current
+    // working state (filter, selection, window geometry) is
+    // deliberately preserved — those aren't layout per se.
+    if (!default_perspective_.empty()) {
+        mgr_.LoadPerspective(default_perspective_, false);
+        mgr_.Update();
+        db_save_ui_state(app_, "layout",
+                         default_perspective_.utf8_string().c_str());
+    }
+    if (feeds_)     feeds_->reset_layout();
+    if (log_)       log_->reset_layout();
+    if (downloads_) downloads_->reset_layout();
+    if (list_) {
+        list_->reset_layout();
+        // Re-run the query so entries come back in SQL order (date
+        // DESC) rather than whatever the previous sort produced.
+        requery();
+    }
     update_menu_checks();
 }
 

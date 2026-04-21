@@ -41,11 +41,19 @@ public:
     // land in the expected order.
     void apply_sort();
 
+    // Restore construction-time columns and clear sort state. The
+    // caller is expected to requery afterwards so app->entries
+    // comes back in its natural (date DESC) SQL order.
+    void reset_layout();
+
 private:
     void on_sort(wxDataViewEvent &);
+    void append_column(const wxString &title);
+    void build_columns(const std::vector<std::string> &order);
 
     Elfeed *app_;
     wxObjectDataPtr<EntryListModel> model_;
+    std::vector<std::string> default_order_;
 };
 
 #endif

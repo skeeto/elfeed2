@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <unordered_set>
 
 class FeedsPanelModel : public wxDataViewVirtualListModel {
 public:
@@ -63,22 +64,14 @@ FeedsPanel::FeedsPanel(wxWindow *parent, Elfeed *app,
     model_ = new FeedsPanelModel(this);
     list_->AssociateModel(model_.get());
 
-    const int col_flags = wxDATAVIEW_COL_RESIZABLE |
-                          wxDATAVIEW_COL_REORDERABLE |
-                          wxDATAVIEW_COL_SORTABLE;
-    list_->AppendTextColumn("Title",   0, wxDATAVIEW_CELL_INERT,
-                            FromDIP(200), wxALIGN_LEFT, col_flags);
-    list_->AppendTextColumn("Updated", 1, wxDATAVIEW_CELL_INERT,
-                            FromDIP(90),  wxALIGN_LEFT, col_flags);
-    // Canonical URL is an advanced/power-user column: most users
-    // don't need to see it. Start hidden; dataview_apply_columns
-    // below restores any user-saved visibility state, and the
-    // right-click header menu exposes the toggle.
-    auto *canonical_col =
-        list_->AppendTextColumn("Canonical URL", 2, wxDATAVIEW_CELL_INERT,
-                                FromDIP(300), wxALIGN_LEFT, col_flags);
-    canonical_col->SetHidden(true);
-    dataview_apply_columns(list_, db_load_ui_state(app_, "cols.feeds"));
+    default_order_ = {"Title", "Updated", "Canonical URL"};
+
+    // Build columns in the saved display order (if any), then apply
+    // saved widths / hidden / sort on top. First-run: no saved data,
+    // build_columns(empty) falls back to default_order_.
+    std::string saved_cols = db_load_ui_state(app_, "cols.feeds");
+    build_columns(dataview_parse_column_order(saved_cols));
+    dataview_apply_columns(list_, saved_cols);
     dataview_apply_sort(list_, db_load_ui_state(app_, "sort.feeds"));
     sz->Add(list_, 1, wxEXPAND);
     SetSizer(sz);
@@ -255,6 +248,60 @@ void FeedsPanel::save_columns()
 {
     db_save_ui_state(app_, "cols.feeds",
                      dataview_serialize_columns(list_).c_str());
+}
+
+void FeedsPanel::append_column(const wxString &title)
+{
+    const int flags = wxDATAVIEW_COL_RESIZABLE |
+                      wxDATAVIEW_COL_REORDERABLE |
+                      wxDATAVIEW_COL_SORTABLE;
+    if (title == "Title") {
+        list_->AppendTextColumn("Title", 0, wxDATAVIEW_CELL_INERT,
+                                FromDIP(200), wxALIGN_LEFT, flags);
+    } else if (title == "Updated") {
+        list_->AppendTextColumn("Updated", 1, wxDATAVIEW_CELL_INERT,
+                                FromDIP(90), wxALIGN_LEFT, flags);
+    } else if (title == "Canonical URL") {
+        // Power-user column; hidden at construction until the user
+        // enables it from the right-click header menu.
+        auto *col =
+            list_->AppendTextColumn("Canonical URL", 2,
+                                    wxDATAVIEW_CELL_INERT,
+                                    FromDIP(300), wxALIGN_LEFT, flags);
+        col->SetHidden(true);
+    }
+}
+
+void FeedsPanel::build_columns(const std::vector<std::string> &order)
+{
+    list_->ClearColumns();
+    // Append titles in the requested order first, skipping anything
+    // we don't recognize (e.g. a column removed between app versions).
+    std::unordered_set<std::string> known(default_order_.begin(),
+                                          default_order_.end());
+    std::unordered_set<std::string> added;
+    for (const auto &t : order) {
+        if (!known.count(t) || added.count(t)) continue;
+        append_column(wxString::FromUTF8(t));
+        added.insert(t);
+    }
+    // Fall back to default order for anything not in the saved state.
+    // Handles first run (empty `order`) and newly-added columns.
+    for (const auto &t : default_order_) {
+        if (added.count(t)) continue;
+        append_column(wxString::FromUTF8(t));
+    }
+}
+
+void FeedsPanel::reset_layout()
+{
+    // ClearColumns + rebuild in default order gives us fresh columns
+    // at construction-time widths + hidden flags, and clears any
+    // header-click sort state for free (sort is attached to columns).
+    build_columns(default_order_);
+    db_save_ui_state(app_, "cols.feeds", "");
+    db_save_ui_state(app_, "sort.feeds", "");
+    refresh();
 }
 
 void FeedsPanel::refresh()

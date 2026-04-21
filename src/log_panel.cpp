@@ -6,6 +6,8 @@
 #include <wx/sizer.h>
 #include <wx/variant.h>
 
+#include <unordered_set>
+
 static const char *kind_name(LogKind k)
 {
     switch (k) {
@@ -98,18 +100,10 @@ LogPanel::LogPanel(wxWindow *parent, Elfeed *app)
     model_ = new LogListModel(this);
     list_->AssociateModel(model_.get());
 
-    const int col_flags = wxDATAVIEW_COL_RESIZABLE |
-                          wxDATAVIEW_COL_REORDERABLE |
-                          wxDATAVIEW_COL_SORTABLE;
-    list_->AppendTextColumn("Time",   0, wxDATAVIEW_CELL_INERT,
-                            FromDIP(140), wxALIGN_LEFT, col_flags);
-    list_->AppendTextColumn("Type",   1, wxDATAVIEW_CELL_INERT,
-                            FromDIP(50),  wxALIGN_LEFT, col_flags);
-    list_->AppendTextColumn("URL",    2, wxDATAVIEW_CELL_INERT,
-                            FromDIP(250), wxALIGN_LEFT, col_flags);
-    list_->AppendTextColumn("Result", 3, wxDATAVIEW_CELL_INERT,
-                            FromDIP(400), wxALIGN_LEFT, col_flags);
-    dataview_apply_columns(list_, db_load_ui_state(app_, "cols.log"));
+    default_order_ = {"Time", "Type", "URL", "Result"};
+    std::string saved_cols = db_load_ui_state(app_, "cols.log");
+    build_columns(dataview_parse_column_order(saved_cols));
+    dataview_apply_columns(list_, saved_cols);
     dataview_apply_sort(list_, db_load_ui_state(app_, "sort.log"));
     list_->Bind(wxEVT_DATAVIEW_COLUMN_HEADER_RIGHT_CLICK,
                 [this](wxDataViewEvent &) {
@@ -250,4 +244,49 @@ void LogPanel::save_columns()
 {
     db_save_ui_state(app_, "cols.log",
                      dataview_serialize_columns(list_).c_str());
+}
+
+void LogPanel::append_column(const wxString &title)
+{
+    const int flags = wxDATAVIEW_COL_RESIZABLE |
+                      wxDATAVIEW_COL_REORDERABLE |
+                      wxDATAVIEW_COL_SORTABLE;
+    if (title == "Time") {
+        list_->AppendTextColumn("Time",   0, wxDATAVIEW_CELL_INERT,
+                                FromDIP(140), wxALIGN_LEFT, flags);
+    } else if (title == "Type") {
+        list_->AppendTextColumn("Type",   1, wxDATAVIEW_CELL_INERT,
+                                FromDIP(50),  wxALIGN_LEFT, flags);
+    } else if (title == "URL") {
+        list_->AppendTextColumn("URL",    2, wxDATAVIEW_CELL_INERT,
+                                FromDIP(250), wxALIGN_LEFT, flags);
+    } else if (title == "Result") {
+        list_->AppendTextColumn("Result", 3, wxDATAVIEW_CELL_INERT,
+                                FromDIP(400), wxALIGN_LEFT, flags);
+    }
+}
+
+void LogPanel::build_columns(const std::vector<std::string> &order)
+{
+    list_->ClearColumns();
+    std::unordered_set<std::string> known(default_order_.begin(),
+                                          default_order_.end());
+    std::unordered_set<std::string> added;
+    for (const auto &t : order) {
+        if (!known.count(t) || added.count(t)) continue;
+        append_column(wxString::FromUTF8(t));
+        added.insert(t);
+    }
+    for (const auto &t : default_order_) {
+        if (added.count(t)) continue;
+        append_column(wxString::FromUTF8(t));
+    }
+}
+
+void LogPanel::reset_layout()
+{
+    build_columns(default_order_);
+    db_save_ui_state(app_, "cols.log", "");
+    db_save_ui_state(app_, "sort.log", "");
+    refresh();
 }

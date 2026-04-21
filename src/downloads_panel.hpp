@@ -22,6 +22,9 @@ public:
     // Persist current column widths/visibility into the DB.
     void save_columns();
 
+    // Restore construction-time columns + clear sort, then refresh.
+    void reset_layout();
+
     // The currently-displayed snapshot, used by the model.
     struct Row {
         int id;
@@ -48,8 +51,12 @@ private:
     wxButton *btn_pause_ = nullptr;
     wxButton *btn_remove_ = nullptr;
 
+    void append_column(const wxString &title);
+    void build_columns(const std::vector<std::string> &order);
+
     friend class DownloadsPanelModel;
     std::vector<Row> snapshot_;
+    std::vector<std::string> default_order_;
 };
 
 #endif

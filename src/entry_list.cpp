@@ -5,6 +5,7 @@
 #include <wx/variant.h>
 
 #include <algorithm>
+#include <unordered_set>
 
 static bool has_tag(const Entry &e, const char *tag)
 {
@@ -89,25 +90,11 @@ EntryList::EntryList(wxWindow *parent, Elfeed *app)
 {
     AssociateModel(model_.get());
 
-    // wxDATAVIEW_COL_HIDDEN is a STATE flag — setting it at construction
-    // would make every column start hidden. We just want resizable +
-    // reorderable + sortable; visibility is handled by the right-click
-    // menu we pop ourselves below.
-    const int col_flags = wxDATAVIEW_COL_RESIZABLE |
-                          wxDATAVIEW_COL_REORDERABLE |
-                          wxDATAVIEW_COL_SORTABLE;
+    default_order_ = {"Date", "Title", "Feed", "Tags"};
 
-    AppendTextColumn("Date",  0, wxDATAVIEW_CELL_INERT,
-                     FromDIP(90),  wxALIGN_LEFT, col_flags);
-    AppendTextColumn("Title", 1, wxDATAVIEW_CELL_INERT,
-                     FromDIP(400), wxALIGN_LEFT, col_flags);
-    AppendTextColumn("Feed",  2, wxDATAVIEW_CELL_INERT,
-                     FromDIP(150), wxALIGN_LEFT, col_flags);
-    AppendTextColumn("Tags",  3, wxDATAVIEW_CELL_INERT,
-                     FromDIP(120), wxALIGN_LEFT, col_flags);
-
-    // Restore saved column widths/visibility and sort state from DB.
-    dataview_apply_columns(this, db_load_ui_state(app_, "cols.entry_list"));
+    std::string saved_cols = db_load_ui_state(app_, "cols.entry_list");
+    build_columns(dataview_parse_column_order(saved_cols));
+    dataview_apply_columns(this, saved_cols);
     dataview_apply_sort(this, db_load_ui_state(app_, "sort.entry_list"));
 
     // Provide our own column-visibility menu — wxDataViewCtrl exposes
@@ -192,6 +179,52 @@ void EntryList::save_columns()
 {
     db_save_ui_state(app_, "cols.entry_list",
                      dataview_serialize_columns(this).c_str());
+}
+
+void EntryList::append_column(const wxString &title)
+{
+    const int flags = wxDATAVIEW_COL_RESIZABLE |
+                      wxDATAVIEW_COL_REORDERABLE |
+                      wxDATAVIEW_COL_SORTABLE;
+    if (title == "Date") {
+        AppendTextColumn("Date",  0, wxDATAVIEW_CELL_INERT,
+                         FromDIP(90),  wxALIGN_LEFT, flags);
+    } else if (title == "Title") {
+        AppendTextColumn("Title", 1, wxDATAVIEW_CELL_INERT,
+                         FromDIP(400), wxALIGN_LEFT, flags);
+    } else if (title == "Feed") {
+        AppendTextColumn("Feed",  2, wxDATAVIEW_CELL_INERT,
+                         FromDIP(150), wxALIGN_LEFT, flags);
+    } else if (title == "Tags") {
+        AppendTextColumn("Tags",  3, wxDATAVIEW_CELL_INERT,
+                         FromDIP(120), wxALIGN_LEFT, flags);
+    }
+}
+
+void EntryList::build_columns(const std::vector<std::string> &order)
+{
+    ClearColumns();
+    std::unordered_set<std::string> known(default_order_.begin(),
+                                          default_order_.end());
+    std::unordered_set<std::string> added;
+    for (const auto &t : order) {
+        if (!known.count(t) || added.count(t)) continue;
+        append_column(wxString::FromUTF8(t));
+        added.insert(t);
+    }
+    for (const auto &t : default_order_) {
+        if (added.count(t)) continue;
+        append_column(wxString::FromUTF8(t));
+    }
+}
+
+void EntryList::reset_layout()
+{
+    build_columns(default_order_);
+    db_save_ui_state(app_, "cols.entry_list", "");
+    db_save_ui_state(app_, "sort.entry_list", "");
+    // Caller (MainFrame) is expected to requery() afterwards to
+    // restore SQL-order (date DESC) rows in app->entries.
 }
 
 void EntryList::refresh_items()

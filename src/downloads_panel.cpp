@@ -72,18 +72,10 @@ DownloadsPanel::DownloadsPanel(wxWindow *parent, Elfeed *app)
     model_ = new DownloadsPanelModel(this);
     list_->AssociateModel(model_.get());
 
-    const int col_flags = wxDATAVIEW_COL_RESIZABLE |
-                          wxDATAVIEW_COL_REORDERABLE |
-                          wxDATAVIEW_COL_SORTABLE;
-    list_->AppendTextColumn("%",     0, wxDATAVIEW_CELL_INERT,
-                            FromDIP(80),  wxALIGN_LEFT, col_flags);
-    list_->AppendTextColumn("Size",  1, wxDATAVIEW_CELL_INERT,
-                            FromDIP(80),  wxALIGN_LEFT, col_flags);
-    list_->AppendTextColumn("Name",  2, wxDATAVIEW_CELL_INERT,
-                            FromDIP(380), wxALIGN_LEFT, col_flags);
-    list_->AppendTextColumn("Fails", 3, wxDATAVIEW_CELL_INERT,
-                            FromDIP(50),  wxALIGN_LEFT, col_flags);
-    dataview_apply_columns(list_, db_load_ui_state(app_, "cols.downloads"));
+    default_order_ = {"%", "Size", "Name", "Fails"};
+    std::string saved_cols = db_load_ui_state(app_, "cols.downloads");
+    build_columns(dataview_parse_column_order(saved_cols));
+    dataview_apply_columns(list_, saved_cols);
     dataview_apply_sort(list_, db_load_ui_state(app_, "sort.downloads"));
     list_->Bind(wxEVT_DATAVIEW_COLUMN_HEADER_RIGHT_CLICK,
                 [this](wxDataViewEvent &) {
@@ -262,4 +254,53 @@ void DownloadsPanel::save_columns()
 {
     db_save_ui_state(app_, "cols.downloads",
                      dataview_serialize_columns(list_).c_str());
+}
+
+void DownloadsPanel::append_column(const wxString &title)
+{
+    const int flags = wxDATAVIEW_COL_RESIZABLE |
+                      wxDATAVIEW_COL_REORDERABLE |
+                      wxDATAVIEW_COL_SORTABLE;
+    if (title == "%") {
+        list_->AppendTextColumn("%",     0, wxDATAVIEW_CELL_INERT,
+                                FromDIP(80),  wxALIGN_LEFT, flags);
+    } else if (title == "Size") {
+        list_->AppendTextColumn("Size",  1, wxDATAVIEW_CELL_INERT,
+                                FromDIP(80),  wxALIGN_LEFT, flags);
+    } else if (title == "Name") {
+        list_->AppendTextColumn("Name",  2, wxDATAVIEW_CELL_INERT,
+                                FromDIP(380), wxALIGN_LEFT, flags);
+    } else if (title == "Fails") {
+        list_->AppendTextColumn("Fails", 3, wxDATAVIEW_CELL_INERT,
+                                FromDIP(50),  wxALIGN_LEFT, flags);
+    }
+}
+
+void DownloadsPanel::build_columns(const std::vector<std::string> &order)
+{
+    list_->ClearColumns();
+    std::unordered_set<std::string> known(default_order_.begin(),
+                                          default_order_.end());
+    std::unordered_set<std::string> added;
+    for (const auto &t : order) {
+        if (!known.count(t) || added.count(t)) continue;
+        append_column(wxString::FromUTF8(t));
+        added.insert(t);
+    }
+    for (const auto &t : default_order_) {
+        if (added.count(t)) continue;
+        append_column(wxString::FromUTF8(t));
+    }
+}
+
+void DownloadsPanel::reset_layout()
+{
+    build_columns(default_order_);
+    db_save_ui_state(app_, "cols.downloads", "");
+    db_save_ui_state(app_, "sort.downloads", "");
+    // Force a full rebuild — the differential update path assumes
+    // aligned snapshots, which doesn't hold after clearing state.
+    snapshot_.clear();
+    model_->Reset(0);
+    refresh();
 }
