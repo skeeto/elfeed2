@@ -2,7 +2,6 @@
 #include "util.hpp"
 
 #include <wx/font.h>
-#include <wx/settings.h>
 #include <wx/variant.h>
 
 #include <algorithm>
@@ -68,11 +67,10 @@ public:
         if (row >= app_->entries.size()) return false;
         if (has_tag(app_->entries[row], "unread")) {
             attr.SetBold(true);
-        } else {
-            attr.SetColour(
-                wxSystemSettings::GetColour(wxSYS_COLOUR_GRAYTEXT));
+            return true;
         }
-        return true;
+        // Read entries get the default style (no attribute).
+        return false;
     }
 
 private:

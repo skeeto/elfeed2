@@ -616,12 +616,18 @@ void MainFrame::action_mark_unread()
 void MainFrame::action_open_in_browser()
 {
     auto sel = list_->selection();
+    if (sel.empty()) return;
     for (long i : sel) {
         if (i < 0 || (size_t)i >= app_->entries.size()) continue;
-        const std::string &link = app_->entries[(size_t)i].link;
-        if (!link.empty())
-            wxLaunchDefaultBrowser(wxString::FromUTF8(link));
+        Entry &e = app_->entries[(size_t)i];
+        if (!e.link.empty())
+            wxLaunchDefaultBrowser(wxString::FromUTF8(e.link));
+        // Opening in the browser counts as reading it — match 'r'.
+        strip_unread(e, app_);
+        list_->refresh_row(i);
     }
+    if (sel.size() == 1) advance_from(sel[0]);
+    update_status();
 }
 
 void MainFrame::action_copy_link()
