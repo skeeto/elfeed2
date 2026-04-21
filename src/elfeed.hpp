@@ -133,6 +133,10 @@ struct Elfeed {
     std::string default_filter = "@6-months-ago +unread";
     int max_connections = 16;
     int fetch_timeout = 30;
+    // Single-letter filter presets (from the `preset` config directive).
+    // Key is the ASCII letter the user pressed; value is the filter
+    // string to apply. Populated by config_load.
+    std::unordered_map<char, std::string> presets;
 
     // Current view (populated by db_query_entries after filter changes)
     std::vector<Entry> entries;

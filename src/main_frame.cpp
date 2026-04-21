@@ -103,13 +103,18 @@ void MainFrame::build_widgets()
     auto *outer = new wxPanel(this);
     auto *vsz = new wxBoxSizer(wxVERTICAL);
 
-    // Filter bar stays outside AUI as a fixed top strip.
+    // Filter bar stays outside AUI as a fixed top strip. The initial
+    // text is the last filter the user had (persisted to the DB on
+    // filter blur), falling back to the config's default_filter.
+    std::string initial_filter = db_load_ui_state(app_, "filter");
+    if (initial_filter.empty()) initial_filter = app_->default_filter;
     filter_ = new wxSearchCtrl(outer, wxID_ANY,
-                               wxString::FromUTF8(app_->default_filter),
+                               wxString::FromUTF8(initial_filter),
                                wxDefaultPosition, wxDefaultSize,
                                wxTE_PROCESS_ENTER);
     filter_->ShowSearchButton(false);
     filter_->ShowCancelButton(true);
+    app_->current_filter = filter_parse(initial_filter);
     vsz->Add(filter_, 0, wxEXPAND | wxALL, FromDIP(4));
 
     // AUI manager lives on a host panel that fills the rest.
@@ -225,6 +230,13 @@ void MainFrame::bind_events()
         filter_->Clear();
     });
     filter_->Bind(wxEVT_CHAR_HOOK, &MainFrame::on_filter_key, this);
+    // Persist the current filter text when the user leaves the filter
+    // control (blur), so it's remembered across runs.
+    filter_->Bind(wxEVT_KILL_FOCUS, [this](wxFocusEvent &e) {
+        db_save_ui_state(app_, "filter",
+                         filter_->GetValue().utf8_string().c_str());
+        e.Skip();
+    });
 
     list_->Bind(wxEVT_DATAVIEW_SELECTION_CHANGED,
                 &MainFrame::on_list_selected, this);
@@ -331,12 +343,20 @@ void MainFrame::toggle_pane(const char *name)
     }
 }
 
-void MainFrame::set_filter_to_feed(const std::string &feed_url)
+void MainFrame::apply_filter(const std::string &text)
 {
-    filter_->ChangeValue(wxString::FromUTF8("=" + feed_url));
-    app_->current_filter = filter_parse("=" + feed_url);
+    filter_->ChangeValue(wxString::FromUTF8(text));
+    app_->current_filter = filter_parse(text);
     requery();
     update_status();
+    // The filter didn't get focus (we're driving it programmatically),
+    // so the KILL_FOCUS handler won't fire — persist explicitly here.
+    db_save_ui_state(app_, "filter", text.c_str());
+}
+
+void MainFrame::set_filter_to_feed(const std::string &feed_url)
+{
+    apply_filter("=" + feed_url);
 }
 
 // ---- Event handlers ------------------------------------------------
@@ -465,6 +485,13 @@ void MainFrame::on_close(wxCloseEvent &)
     if (log_)       log_->save_columns();
     if (downloads_) downloads_->save_columns();
 
+    // Filter text: the KILL_FOCUS handler covers typed edits, but if
+    // the filter still has focus at quit-time the blur doesn't fire.
+    if (filter_) {
+        db_save_ui_state(app_, "filter",
+                         filter_->GetValue().utf8_string().c_str());
+    }
+
     // Save the AUI perspective last (covers pane positions).
     wxString persp = mgr_.SavePerspective();
     db_save_ui_state(app_, "layout", persp.utf8_string().c_str());
@@ -522,6 +549,26 @@ void MainFrame::on_list_key(wxKeyEvent &e)
         }
         break;
     }
+
+    // User-defined filter presets bound to single keys via the `preset`
+    // config directive. Built-in keys above take precedence, so users
+    // can't override j/k/u/r/etc. — but any other printable ASCII
+    // (letters, digits, punctuation) is fair game. Shift turns e.g.
+    // 'h' into 'H', so both case variants can be bound independently.
+    if (!e.ControlDown() && !e.AltDown() && !e.MetaDown() &&
+        code >= 0x20 && code < 0x7F) {
+        char c = (char)code;
+        // wxKeyEvent reports letter codes in uppercase; map to lowercase
+        // when Shift isn't held so `preset h` matches a plain `h` press.
+        if (!e.ShiftDown() && c >= 'A' && c <= 'Z')
+            c = (char)(c - 'A' + 'a');
+        auto it = app_->presets.find(c);
+        if (it != app_->presets.end()) {
+            apply_filter(it->second);
+            return;
+        }
+    }
+
     e.Skip();
 }
 

@@ -72,6 +72,20 @@ rest of the line:
     reddit cpp
       tag programming
 
+### Filter presets
+
+A `preset KEY FILTER` directive binds a single key to a filter string.
+While the entry list has focus, pressing that key jumps the filter
+bar (and the listing) to that filter. Built-in navigation keys
+(`j`/`k`/`g`/`G`/`u`/`r`/`b`/`y`/`d`/`f`/`s`/`/`) take precedence.
+
+    preset h @1-month +unread
+    preset v @1-month +youtube
+    preset n @1-month -youtube
+
+The current filter is also persisted to the database when the filter
+bar loses focus, so it's remembered across restarts.
+
 ## Usage
 
 ### Filter syntax

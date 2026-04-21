@@ -16,6 +16,9 @@
 //
 //   alias youtube https://www.youtube.com/feeds/videos.xml?channel_id={}
 //
+//   preset h @1-month +unread            # press 'h' in the list to
+//   preset v @1-month +youtube           # jump the filter to this
+//
 //   https://acoup.blog/feed/             # URL line opens a stanza
 //     title A Collection of Unmitigated Pedantry
 //     tag   blog history
@@ -64,17 +67,25 @@ std::vector<std::string> tokenize(const std::string &line)
     return out;
 }
 
-// Return the substring of `line` starting just past the first token's
+// Return the substring of `line` starting just past the Nth token's
 // trailing whitespace. `line` is assumed trimmed. Preserves internal
 // whitespace; strips trailing whitespace.
-std::string value_after_directive(const std::string &line)
+std::string value_after_tokens(const std::string &line, size_t n)
 {
     size_t i = 0;
-    while (i < line.size() && !std::isspace((unsigned char)line[i])) ++i;
+    for (size_t t = 0; t < n; t++) {
+        while (i < line.size() && std::isspace((unsigned char)line[i])) ++i;
+        while (i < line.size() && !std::isspace((unsigned char)line[i])) ++i;
+    }
     while (i < line.size() && std::isspace((unsigned char)line[i])) ++i;
     std::string v = line.substr(i);
     while (!v.empty() && std::isspace((unsigned char)v.back())) v.pop_back();
     return v;
+}
+
+std::string value_after_directive(const std::string &line)
+{
+    return value_after_tokens(line, 1);
 }
 
 std::string expand_tilde(const std::string &val)
@@ -129,6 +140,20 @@ void config_load(Elfeed *app)
                 continue;
             }
             aliases[tokens[1]] = tokens[2];
+            continue;
+        }
+
+        // --- filter preset bound to a single key -------------------
+        if (dir0 == "preset") {
+            if (tokens.size() < 3) {
+                warn("preset needs a letter and a filter string", ln);
+                continue;
+            }
+            if (tokens[1].size() != 1) {
+                warn("preset key must be a single character", ln);
+                continue;
+            }
+            app->presets[tokens[1][0]] = value_after_tokens(line, 2);
             continue;
         }
 

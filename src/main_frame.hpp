@@ -34,6 +34,11 @@ private:
     void update_status();
     void update_menu_checks();
 
+    // Apply `text` to the filter bar, re-run the query, and persist
+    // the filter to the DB. Used by preset keys, feed-row double-click,
+    // and on-blur.
+    void apply_filter(const std::string &text);
+
     // ---- Selection helpers ----
     void move_selection(int delta);
     void go_to(long row);
