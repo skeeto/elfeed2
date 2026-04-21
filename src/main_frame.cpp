@@ -356,7 +356,14 @@ void MainFrame::apply_filter(const std::string &text)
 
 void MainFrame::set_filter_to_feed(const std::string &feed_url)
 {
-    apply_filter("=" + feed_url);
+    // Drop the "scheme://" prefix so the filter reads =example.com/...
+    // rather than =https://example.com/... — shorter, friendlier, and
+    // in the rare case a user has otherwise-identical http and https
+    // feeds they can just retype the scheme manually.
+    std::string tail = feed_url;
+    size_t sep = tail.find("://");
+    if (sep != std::string::npos) tail.erase(0, sep + 3);
+    apply_filter("=" + tail);
 }
 
 // ---- Event handlers ------------------------------------------------

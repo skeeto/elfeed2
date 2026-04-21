@@ -555,59 +555,56 @@ void db_query_entries(Elfeed *app, const Filter &filter,
             }
         }
 
+        // Look up feed title once, lazily, for = / ~ checks below.
+        auto find_feed_title = [&]() -> std::string {
+            for (auto &f : app->feeds)
+                if (f.url == e.feed_url) return f.title;
+            return {};
+        };
+
+        // Case-insensitive substring search. We don't treat = / ~
+        // patterns as regex: real-world values are URLs full of regex
+        // metacharacters (? . + etc.), so regex semantics surprise
+        // users. Title-text filters (bare / !) below are still regex.
+        auto icontains = [](const std::string &hay,
+                            const std::string &needle) {
+            if (needle.empty()) return true;
+            if (needle.size() > hay.size()) return false;
+            auto lc = [](unsigned char c) -> unsigned char {
+                return (c >= 'A' && c <= 'Z') ? (unsigned char)(c | 0x20) : c;
+            };
+            for (size_t i = 0; i + needle.size() <= hay.size(); i++) {
+                size_t j = 0;
+                for (; j < needle.size(); j++)
+                    if (lc((unsigned char)hay[i + j]) !=
+                        lc((unsigned char)needle[j])) break;
+                if (j == needle.size()) return true;
+            }
+            return false;
+        };
+
         // Feed URL/title match (= prefix)
         if (keep && !filter.feeds.empty()) {
             bool any_match = false;
-            // Look up feed title
-            std::string feed_title;
-            for (auto &f : app->feeds) {
-                if (f.url == e.feed_url) {
-                    feed_title = f.title;
-                    break;
-                }
-            }
+            std::string feed_title = find_feed_title();
             for (auto &pat : filter.feeds) {
-                try {
-                    std::regex re(pat, std::regex_constants::icase);
-                    if (std::regex_search(e.feed_url, re) ||
-                        std::regex_search(feed_title, re)) {
-                        any_match = true;
-                        break;
-                    }
-                } catch (...) {
-                    if (e.feed_url.find(pat) != std::string::npos ||
-                        feed_title.find(pat) != std::string::npos) {
-                        any_match = true;
-                        break;
-                    }
+                if (icontains(e.feed_url, pat) ||
+                    icontains(feed_title, pat)) {
+                    any_match = true;
+                    break;
                 }
             }
             if (!any_match) keep = false;
         }
 
         // Feed URL/title NOT match (~ prefix)
-        if (keep) {
+        if (keep && !filter.not_feeds.empty()) {
+            std::string feed_title = find_feed_title();
             for (auto &pat : filter.not_feeds) {
-                std::string feed_title;
-                for (auto &f : app->feeds) {
-                    if (f.url == e.feed_url) {
-                        feed_title = f.title;
-                        break;
-                    }
-                }
-                try {
-                    std::regex re(pat, std::regex_constants::icase);
-                    if (std::regex_search(e.feed_url, re) ||
-                        std::regex_search(feed_title, re)) {
-                        keep = false;
-                        break;
-                    }
-                } catch (...) {
-                    if (e.feed_url.find(pat) != std::string::npos ||
-                        feed_title.find(pat) != std::string::npos) {
-                        keep = false;
-                        break;
-                    }
+                if (icontains(e.feed_url, pat) ||
+                    icontains(feed_title, pat)) {
+                    keep = false;
+                    break;
                 }
             }
         }
