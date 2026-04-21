@@ -593,21 +593,12 @@ ImportStats import_classic_elfeed(Elfeed *app, const std::string &path)
             for (size_t i = 0; i + 1 < data->children.size(); i += 2) {
                 Feed feed;
                 if (!extract_feed(data->children[i + 1].get(), feed)) continue;
+                // The import only writes to the feed table — the set of
+                // feeds the user wants fetched is determined solely by
+                // the config file. Imported feeds become part of the
+                // historical record but are not auto-subscribed; if the
+                // user wants them refetched they add the URL to config.
                 db_update_feed(app, feed);
-                // Merge into app->feeds if not already present
-                bool have = false;
-                for (auto &existing : app->feeds) {
-                    if (existing.url == feed.url) {
-                        // Keep the existing feed's autotags (from
-                        // config); refresh metadata from the import.
-                        auto autotags = existing.autotags;
-                        existing = feed;
-                        existing.autotags = std::move(autotags);
-                        have = true;
-                        break;
-                    }
-                }
-                if (!have) app->feeds.push_back(feed);
                 stats.feeds_imported++;
             }
         }

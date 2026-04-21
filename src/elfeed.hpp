@@ -6,6 +6,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 struct sqlite3;
@@ -42,7 +43,8 @@ struct Entry {
 
 struct Feed {
     std::string url;
-    std::string title;
+    std::string title;        // self-declared by the feed
+    std::string user_title;   // override from config; empty if none
     std::string author;
     std::string etag;
     std::string last_modified;
@@ -136,6 +138,12 @@ struct Elfeed {
     std::vector<Entry> entries;
     Filter current_filter;
 
+    // URL → display title for every feed the DB knows about (subscribed
+    // or not). Display code reads this; the source of truth is the DB.
+    // COALESCE(title_user, title) at load time. Refreshed by
+    // db_load_feed_titles() after config sync, fetch, or import.
+    std::unordered_map<std::string, std::string> feed_titles;
+
     // Fetch
     std::mutex fetch_mutex;
     std::vector<FetchResult> fetch_inbox;
@@ -185,6 +193,13 @@ void db_untag(Elfeed *app, const std::string &ns, const std::string &id,
               const std::string &tag);
 void db_update_feed(Elfeed *app, const Feed &feed);
 void db_load_feeds(Elfeed *app);
+// Set or clear the user-supplied title override for `url`. An empty
+// title clears it (NULL in the DB), so the display falls back to the
+// self-declared title from the feed XML.
+void db_set_user_title(Elfeed *app, const std::string &url,
+                       const std::string &title);
+// Refresh app->feed_titles from the DB.
+void db_load_feed_titles(Elfeed *app);
 void db_save_ui_state(Elfeed *app, const char *key, const char *value);
 std::string db_load_ui_state(Elfeed *app, const char *key);
 

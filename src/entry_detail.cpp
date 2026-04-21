@@ -88,9 +88,9 @@ void EntryDetail::show_entry(const Entry *e)
     title_->SetLabel(wxString::FromUTF8(html_strip(e->title)));
 
     std::string feed_title;
-    for (auto &f : app_->feeds) {
-        if (f.url == e->feed_url) { feed_title = f.title; break; }
-    }
+    auto fit = app_->feed_titles.find(e->feed_url);
+    if (fit != app_->feed_titles.end()) feed_title = fit->second;
+    else                                feed_title = e->feed_url;
 
     std::string authors;
     for (auto &a : e->authors) {

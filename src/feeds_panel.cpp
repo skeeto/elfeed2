@@ -31,15 +31,17 @@ FeedsPanel::FeedsPanel(wxWindow *parent, Elfeed *app,
 void FeedsPanel::refresh()
 {
     // Snapshot (url, display title) pairs so the view stays coherent
-    // even if app->feeds is mutated later (titles get set on first
-    // successful fetch).
+    // across later mutations. Display title comes from the DB-backed
+    // map (which honors user_title overrides), with a fallback to the
+    // raw URL for feeds that haven't been fetched yet.
     struct Row { std::string url, title; double updated; };
     std::vector<Row> rows;
     rows.reserve(app_->feeds.size());
     for (auto &f : app_->feeds) {
         Row r;
         r.url = f.url;
-        r.title = f.title.empty() ? f.url : f.title;
+        auto it = app_->feed_titles.find(f.url);
+        r.title = (it != app_->feed_titles.end()) ? it->second : f.url;
         r.updated = f.last_update;
         rows.push_back(std::move(r));
     }

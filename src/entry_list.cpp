@@ -62,10 +62,12 @@ wxString EntryList::OnGetItemText(long item, long column) const
     case 1:
         return wxString::FromUTF8(html_strip(e.title));
     case 2: {
-        for (auto &f : app_->feeds) {
-            if (f.url == e.feed_url)
-                return wxString::FromUTF8(f.title);
-        }
+        // Title comes from the DB-backed map (which has every feed
+        // ever fetched, not just current subscriptions). Falls back
+        // to the URL when nothing's known yet.
+        auto it = app_->feed_titles.find(e.feed_url);
+        if (it != app_->feed_titles.end())
+            return wxString::FromUTF8(it->second);
         return wxString::FromUTF8(e.feed_url);
     }
     case 3: {

@@ -13,7 +13,11 @@
 static const char *schema_sql = R"(
 CREATE TABLE IF NOT EXISTS feed (
     url           TEXT PRIMARY KEY,
+    -- title is the feed's self-declared title (from the feed XML).
+    -- title_user is the user's override from config; takes precedence
+    -- at display time. Display uses COALESCE(title_user, title, url).
     title         TEXT,
+    title_user    TEXT,
     author        TEXT,
     etag          TEXT,
     last_modified TEXT,
@@ -132,6 +136,48 @@ void db_update_feed(Elfeed *app, const Feed &feed)
     sqlite3_bind_int(stmt, 7, feed.failures);
     sqlite3_bind_double(stmt, 8, feed.last_update);
     sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+}
+
+void db_set_user_title(Elfeed *app, const std::string &url,
+                       const std::string &title)
+{
+    if (!app->db) return;
+    // UPSERT: create the row if it doesn't exist, otherwise update only
+    // the title_user column. NULL when title is empty so the COALESCE
+    // in db_load_feed_titles falls through to the self-declared title.
+    const char *sql =
+        "INSERT INTO feed (url,title_user) VALUES (?,?)"
+        " ON CONFLICT(url) DO UPDATE SET title_user=excluded.title_user";
+    sqlite3_stmt *stmt;
+    if (sqlite3_prepare_v2(app->db, sql, -1, &stmt, nullptr) != SQLITE_OK)
+        return;
+    sqlite3_bind_text(stmt, 1, url.c_str(), -1, SQLITE_TRANSIENT);
+    if (title.empty())
+        sqlite3_bind_null(stmt, 2);
+    else
+        sqlite3_bind_text(stmt, 2, title.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+}
+
+void db_load_feed_titles(Elfeed *app)
+{
+    app->feed_titles.clear();
+    if (!app->db) return;
+    // user-set title overrides self-declared; both NULL → no entry.
+    const char *sql =
+        "SELECT url, COALESCE(NULLIF(title_user,''), NULLIF(title,''))"
+        " FROM feed";
+    sqlite3_stmt *stmt;
+    if (sqlite3_prepare_v2(app->db, sql, -1, &stmt, nullptr) != SQLITE_OK)
+        return;
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        const char *url = (const char *)sqlite3_column_text(stmt, 0);
+        const char *title = (const char *)sqlite3_column_text(stmt, 1);
+        if (url && title && *title)
+            app->feed_titles.emplace(url, title);
+    }
     sqlite3_finalize(stmt);
 }
 

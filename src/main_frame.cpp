@@ -381,7 +381,10 @@ void MainFrame::do_import_classic()
         return;
     }
 
-    // Refresh the UI to show imported content
+    // Refresh the UI to show imported content. Reload the title map
+    // first so imported feeds (which won't be in app->feeds) still
+    // resolve to nice titles in the entry list / detail panel.
+    db_load_feed_titles(app_);
     requery();
     if (feeds_) feeds_->refresh();
     update_status();

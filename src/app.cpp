@@ -49,6 +49,18 @@ void elfeed_init(Elfeed *app)
     config_load(app);
     db_open(app);
     db_load_feeds(app);
+
+    // Sync user-set titles into the DB. Each feed listed in config gets
+    // its title_user written: a non-empty user_title sets the override,
+    // an empty one clears it (the rule: "if the config lists a feed
+    // without a title, forget the user-set title"). Feeds NOT in
+    // config are left alone — their stored title_user persists so the
+    // historical entry view still shows a friendly name.
+    for (auto &f : app->feeds)
+        db_set_user_title(app, f.url, f.user_title);
+
+    db_load_feed_titles(app);
+
     app->current_filter = filter_parse(app->default_filter);
 }
 

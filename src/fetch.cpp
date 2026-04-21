@@ -213,5 +213,9 @@ bool fetch_process_results(Elfeed *app)
 
         db_add_entries(app, parsed.entries);
     }
+    // A successful fetch may have changed self-declared feed titles
+    // (or filled them in for the first time). Refresh the display map
+    // so the entry list and detail panel pick the new title up.
+    db_load_feed_titles(app);
     return true;
 }
