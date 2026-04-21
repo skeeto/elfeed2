@@ -1,26 +1,57 @@
 #include "entry_detail.hpp"
 #include "util.hpp"
 
+#include <wx/cursor.h>
 #include <wx/font.h>
-#include <wx/hyperlink.h>
 #include <wx/html/htmlwin.h>
+#include <wx/settings.h>
 #include <wx/sizer.h>
 #include <wx/stattext.h>
+#include <wx/utils.h>
 
 EntryDetail::EntryDetail(wxWindow *parent, Elfeed *app)
     : wxPanel(parent, wxID_ANY)
     , app_(app)
 {
-    title_ = new wxStaticText(this, wxID_ANY, "(no entry selected)");
+    // wxST_ELLIPSIZE_* only affects drawing — wxStaticText's best-size
+    // still reflects the full label width, so the sizer still pins the
+    // pane's min width unless we also force a small MinSize. Picking a
+    // tiny floor lets the sizer shrink the widget freely; the ellipsize
+    // style kicks in to truncate the displayed text.
+    const wxSize kShrinkable(FromDIP(20), -1);
+
+    title_ = new wxStaticText(this, wxID_ANY, "(no entry selected)",
+                              wxDefaultPosition, wxDefaultSize,
+                              wxST_ELLIPSIZE_END);
     wxFont title_font = title_->GetFont();
     title_font.SetWeight(wxFONTWEIGHT_BOLD);
     title_font.SetPointSize(title_font.GetPointSize() + 2);
     title_->SetFont(title_font);
+    title_->SetMinSize(kShrinkable);
 
-    subtitle_ = new wxStaticText(this, wxID_ANY, "");
-    // wxHyperlinkCtrl rejects an empty label+URL pair. Seed it with a
-    // placeholder that show_entry() overwrites.
-    link_ = new wxHyperlinkCtrl(this, wxID_ANY, " ", "about:blank");
+    subtitle_ = new wxStaticText(this, wxID_ANY, "",
+                                 wxDefaultPosition, wxDefaultSize,
+                                 wxST_ELLIPSIZE_END);
+    subtitle_->SetMinSize(kShrinkable);
+
+    // Clickable URL label. We use wxStaticText instead of
+    // wxHyperlinkCtrl because the latter has no ellipsize support and
+    // a long URL would pin the pane's min width. We apply the
+    // hyperlink look (blue + underline) manually and launch the
+    // browser on left-click.
+    link_ = new wxStaticText(this, wxID_ANY, "",
+                             wxDefaultPosition, wxDefaultSize,
+                             wxST_ELLIPSIZE_MIDDLE);
+    link_->SetForegroundColour(
+        wxSystemSettings::GetColour(wxSYS_COLOUR_HOTLIGHT));
+    {
+        wxFont f = link_->GetFont();
+        f.SetUnderlined(true);
+        link_->SetFont(f);
+    }
+    link_->SetCursor(wxCursor(wxCURSOR_HAND));
+    link_->Bind(wxEVT_LEFT_UP, &EntryDetail::on_link_click, this);
+    link_->SetMinSize(kShrinkable);
     link_->Hide();
 
     body_ = new wxHtmlWindow(this, wxID_ANY, wxDefaultPosition, wxDefaultSize,
@@ -35,6 +66,12 @@ EntryDetail::EntryDetail(wxWindow *parent, Elfeed *app)
     SetSizer(sz);
 
     show_entry(nullptr);
+}
+
+void EntryDetail::on_link_click(wxMouseEvent &)
+{
+    if (!link_url_.empty())
+        wxLaunchDefaultBrowser(wxString::FromUTF8(link_url_));
 }
 
 void EntryDetail::show_entry(const Entry *e)
@@ -73,10 +110,11 @@ void EntryDetail::show_entry(const Entry *e)
     subtitle_->SetLabel(wxString::FromUTF8(sub));
 
     if (!e->link.empty()) {
+        link_url_ = e->link;
         link_->SetLabel(wxString::FromUTF8(e->link));
-        link_->SetURL(wxString::FromUTF8(e->link));
         link_->Show();
     } else {
+        link_url_.clear();
         link_->Hide();
     }
 

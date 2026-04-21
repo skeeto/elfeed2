@@ -6,11 +6,13 @@
 
 class wxStaticText;
 class wxHtmlWindow;
-class wxHyperlinkCtrl;
+class wxMouseEvent;
 
 // Right/bottom pane showing the focused entry: small header strip
 // (title, feed · date · authors, link) followed by a wxHtmlWindow
-// rendering the body content.
+// rendering the body content. All three header rows use
+// wxST_ELLIPSIZE_* styles so the pane can be resized narrower than
+// the full label width — important when a title or URL is long.
 class EntryDetail : public wxPanel {
 public:
     EntryDetail(wxWindow *parent, Elfeed *app);
@@ -19,10 +21,13 @@ public:
     void show_entry(const Entry *entry);
 
 private:
+    void on_link_click(wxMouseEvent &);
+
     Elfeed *app_;
     wxStaticText *title_ = nullptr;
     wxStaticText *subtitle_ = nullptr;
-    wxHyperlinkCtrl *link_ = nullptr;
+    wxStaticText *link_ = nullptr;
+    std::string   link_url_;   // click target for link_
     wxHtmlWindow *body_ = nullptr;
 };
 
