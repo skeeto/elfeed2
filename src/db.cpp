@@ -233,8 +233,17 @@ void db_add_entries(Elfeed *app, std::vector<Entry> &entries)
         " date=excluded.date,content=excluded.content,"
         " content_type=excluded.content_type";
 
-    // For tags we INSERT OR IGNORE so user-applied tags (e.g. read/unread
-    // toggled on a previously-fetched entry) survive a refetch.
+    // Existence probe so we can tell INSERT from UPDATE on the upsert
+    // above. SQLite reports the same `changes()` count for both paths,
+    // so we precheck. This drives the merge rule: tags are applied
+    // only on first sight of an entry — see elfeed-db.el's
+    // elfeed-entry-merge, which preserves the existing entry's tag
+    // set verbatim across a refetch. Without this, every refetch
+    // would silently restore "unread" on entries the user has read.
+    const char *exists_sql =
+        "SELECT 1 FROM entry WHERE namespace=? AND id=?";
+
+    // Tag insert is only used when an entry is new (see above).
     const char *tag_sql =
         "INSERT OR IGNORE INTO entry_tag (namespace,entry_id,tag)"
         " VALUES (?,?,?)";
@@ -255,6 +264,7 @@ void db_add_entries(Elfeed *app, std::vector<Entry> &entries)
         " VALUES (?,?,?,?,?,?)";
 
     sqlite3_stmt *stmt = nullptr;
+    sqlite3_stmt *exists_stmt = nullptr;
     sqlite3_stmt *tag_stmt = nullptr;
     sqlite3_stmt *auth_del_stmt = nullptr;
     sqlite3_stmt *auth_ins_stmt = nullptr;
@@ -264,10 +274,13 @@ void db_add_entries(Elfeed *app, std::vector<Entry> &entries)
     auto prep = [&](const char *sql, sqlite3_stmt **out) {
         return sqlite3_prepare_v2(app->db, sql, -1, out, nullptr) == SQLITE_OK;
     };
-    if (!prep(upsert, &stmt) || !prep(tag_sql, &tag_stmt) ||
+    if (!prep(upsert, &stmt) ||
+        !prep(exists_sql, &exists_stmt) ||
+        !prep(tag_sql, &tag_stmt) ||
         !prep(author_del, &auth_del_stmt) || !prep(author_ins, &auth_ins_stmt) ||
         !prep(enc_del, &enc_del_stmt) || !prep(enc_ins, &enc_ins_stmt)) {
         if (stmt)          sqlite3_finalize(stmt);
+        if (exists_stmt)   sqlite3_finalize(exists_stmt);
         if (tag_stmt)      sqlite3_finalize(tag_stmt);
         if (auth_del_stmt) sqlite3_finalize(auth_del_stmt);
         if (auth_ins_stmt) sqlite3_finalize(auth_ins_stmt);
@@ -278,6 +291,15 @@ void db_add_entries(Elfeed *app, std::vector<Entry> &entries)
     }
 
     for (auto &e : entries) {
+        // First-sight check: tags only flow through on INSERT, not on
+        // UPDATE. Once a tag set exists for an entry, it's the user's
+        // (and the database's) — fetched tags from a refetch are
+        // discarded so the user's read state is preserved.
+        sqlite3_reset(exists_stmt);
+        sqlite3_bind_text(exists_stmt, 1, e.namespace_.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(exists_stmt, 2, e.id.c_str(), -1, SQLITE_TRANSIENT);
+        bool existed = (sqlite3_step(exists_stmt) == SQLITE_ROW);
+
         sqlite3_reset(stmt);
         sqlite3_bind_text(stmt, 1, e.namespace_.c_str(), -1, SQLITE_TRANSIENT);
         sqlite3_bind_text(stmt, 2, e.id.c_str(), -1, SQLITE_TRANSIENT);
@@ -299,12 +321,14 @@ void db_add_entries(Elfeed *app, std::vector<Entry> &entries)
                        sqlite3_errmsg(app->db));
         }
 
-        for (auto &tag : e.tags) {
-            sqlite3_reset(tag_stmt);
-            sqlite3_bind_text(tag_stmt, 1, e.namespace_.c_str(), -1, SQLITE_TRANSIENT);
-            sqlite3_bind_text(tag_stmt, 2, e.id.c_str(), -1, SQLITE_TRANSIENT);
-            sqlite3_bind_text(tag_stmt, 3, tag.c_str(), -1, SQLITE_TRANSIENT);
-            sqlite3_step(tag_stmt);
+        if (!existed) {
+            for (auto &tag : e.tags) {
+                sqlite3_reset(tag_stmt);
+                sqlite3_bind_text(tag_stmt, 1, e.namespace_.c_str(), -1, SQLITE_TRANSIENT);
+                sqlite3_bind_text(tag_stmt, 2, e.id.c_str(), -1, SQLITE_TRANSIENT);
+                sqlite3_bind_text(tag_stmt, 3, tag.c_str(), -1, SQLITE_TRANSIENT);
+                sqlite3_step(tag_stmt);
+            }
         }
 
         // Refresh authors: delete existing, insert current list.
@@ -343,6 +367,7 @@ void db_add_entries(Elfeed *app, std::vector<Entry> &entries)
     }
 
     sqlite3_finalize(stmt);
+    sqlite3_finalize(exists_stmt);
     sqlite3_finalize(auth_del_stmt);
     sqlite3_finalize(auth_ins_stmt);
     sqlite3_finalize(enc_del_stmt);
