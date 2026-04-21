@@ -25,43 +25,52 @@ fetched automatically.
 ## Configuration
 
 The configuration file is at `$XDG_CONFIG_HOME/elfeed2/config` (typically
-`~/.config/elfeed2/config`) on all platforms. It is a simple line-oriented
-format.
+`~/.config/elfeed2/config`) on all platforms. It is a line-oriented
+format inspired by `ssh_config`: directives are `keyword value`, blank
+lines are cosmetic, and comments start with `#` at the start of a
+line or preceded by whitespace.
+
+### Global settings
+
+    download-dir    ~/Downloads            # ~ expands to your home
+    ytdlp-program   yt-dlp
+    ytdlp-arg       --no-warnings          # repeatable
+    ytdlp-arg       --embed-metadata
+    default-filter  @6-months-ago +unread
+    max-connections 16
+    fetch-timeout   30                     # per-feed, seconds
 
 ### Feeds
 
-Lines containing `://` are feed URLs. Optional space-separated autotags
-follow the URL:
+A line whose first token contains `://` opens a new feed stanza.
+Lines after it apply to that stanza until the next URL line. `title`
+overrides the feed's self-declared title; `tag` adds autotags (one or
+more per line, repeatable).
 
-    https://example.com/feed.xml
-    https://blog.example.com/rss comic webcomic
+    https://acoup.blog/feed/
+      title A Collection of Unmitigated Pedantry
+      tag   blog history
 
-Autotags are automatically applied to new entries from that feed.
+    https://example.com/comic/feed/
+      tag comic webcomic
 
-### Settings
+Indentation is cosmetic — the parser doesn't require it.
 
-Lines with `key=value` configure application behavior:
+### Aliases (macros)
 
-    # Directory for yt-dlp downloads (~ is expanded)
-    download-dir = ~/Downloads
+An `alias NAME TEMPLATE` directive defines a shortcut. Using the
+alias name in place of a URL expands `{}` in the template with the
+rest of the line:
 
-    # yt-dlp binary name or path
-    ytdlp-program = yt-dlp
+    alias youtube https://www.youtube.com/feeds/videos.xml?channel_id={}
+    alias reddit  https://www.reddit.com/r/{}/.rss
 
-    # Extra yt-dlp arguments (one per line, repeatable)
-    ytdlp-arg = --no-warnings
-    ytdlp-arg = --embed-metadata
+    youtube UCbtwi4wK1YXd9AyV_4UcE6g
+      title Adrian's Digital Basement
+      tag   retrocomputing
 
-    # Default search filter shown on startup
-    default-filter = @6-months-ago +unread
-
-    # Maximum concurrent feed fetches
-    max-connections = 16
-
-    # Per-feed fetch timeout in seconds
-    fetch-timeout = 30
-
-Comments begin with `#`. Blank lines are ignored.
+    reddit cpp
+      tag programming
 
 ## Usage
 
