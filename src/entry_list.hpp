@@ -32,6 +32,10 @@ public:
     // Scroll `row` into view if it isn't already.
     void ensure_visible_row(long row);
 
+    // Persist current column widths/visibility into the DB. Called on
+    // app close.
+    void save_columns();
+
 private:
     Elfeed *app_;
     wxObjectDataPtr<EntryListModel> model_;

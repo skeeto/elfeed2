@@ -6,7 +6,10 @@
 // plain std::string / double so non-UI modules don't pull in wxWidgets
 // headers in their own headers; the .cpp uses wxDateTime / wxFileName.
 
+#include <functional>
 #include <string>
+
+class wxDataViewCtrl;
 
 // ---- Filesystem ----
 
@@ -35,6 +38,23 @@ std::string user_config_dir();
 
 // The user's home directory (e.g. for `~` expansion in config paths).
 std::string user_home_dir();
+
+// ---- wxDataViewCtrl column persistence ----
+
+// Serialize each column's title, current width, and hidden state into
+// a single string. Round-tripped via dataview_apply_columns.
+std::string dataview_serialize_columns(wxDataViewCtrl *ctrl);
+
+// Apply a previously-serialized column state to `ctrl`. Columns absent
+// from `saved` keep their construction defaults; columns in `saved`
+// that no longer exist in the control are ignored.
+void dataview_apply_columns(wxDataViewCtrl *ctrl, const std::string &saved);
+
+// Pop up a context menu listing each column with a checkbox for its
+// visibility. Toggling an item flips the column's hidden state and
+// invokes `on_change` (typically used to persist the new state).
+void dataview_show_column_menu(wxDataViewCtrl *ctrl,
+                               const std::function<void()> &on_change);
 
 // ---- Time formatting (local time) ----
 

@@ -1,4 +1,5 @@
 #include "downloads_panel.hpp"
+#include "util.hpp"
 
 #include <wx/button.h>
 #include <wx/sizer.h>
@@ -72,8 +73,7 @@ DownloadsPanel::DownloadsPanel(wxWindow *parent, Elfeed *app)
     list_->AssociateModel(model_.get());
 
     const int col_flags = wxDATAVIEW_COL_RESIZABLE |
-                          wxDATAVIEW_COL_REORDERABLE |
-                          wxDATAVIEW_COL_HIDDEN;
+                          wxDATAVIEW_COL_REORDERABLE;
     list_->AppendTextColumn("%",     0, wxDATAVIEW_CELL_INERT,
                             FromDIP(80),  wxALIGN_LEFT, col_flags);
     list_->AppendTextColumn("Size",  1, wxDATAVIEW_CELL_INERT,
@@ -82,6 +82,12 @@ DownloadsPanel::DownloadsPanel(wxWindow *parent, Elfeed *app)
                             FromDIP(380), wxALIGN_LEFT, col_flags);
     list_->AppendTextColumn("Fails", 3, wxDATAVIEW_CELL_INERT,
                             FromDIP(50),  wxALIGN_LEFT, col_flags);
+    dataview_apply_columns(list_, db_load_ui_state(app_, "cols.downloads"));
+    list_->Bind(wxEVT_DATAVIEW_COLUMN_HEADER_RIGHT_CLICK,
+                [this](wxDataViewEvent &) {
+                    dataview_show_column_menu(list_,
+                                              [this] { save_columns(); });
+                });
     vsz->Add(list_, 1, wxEXPAND);
 
     SetSizer(vsz);
@@ -167,4 +173,10 @@ void DownloadsPanel::on_remove(wxCommandEvent &)
     }
     for (int id : ids) download_remove(app_, id);
     refresh();
+}
+
+void DownloadsPanel::save_columns()
+{
+    db_save_ui_state(app_, "cols.downloads",
+                     dataview_serialize_columns(list_).c_str());
 }

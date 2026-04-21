@@ -20,6 +20,9 @@ public:
     // only; takes app->log_mutex internally.
     void refresh();
 
+    // Persist current column widths/visibility into the DB.
+    void save_columns();
+
 private:
     void on_filter_changed(wxCommandEvent &);
     void on_clear(wxCommandEvent &);

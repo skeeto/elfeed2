@@ -21,6 +21,9 @@ public:
     // Re-snapshot from app->feeds and repopulate. UI-thread only.
     void refresh();
 
+    // Persist current column widths/visibility into the DB.
+    void save_columns();
+
     // Snapshot of the rows currently displayed, in display order.
     // Read by the model; lookup target for the activate event.
     struct Row { std::string url, title; double updated; };

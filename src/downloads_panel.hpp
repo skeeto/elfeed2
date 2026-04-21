@@ -19,6 +19,9 @@ public:
     // Re-snapshot app->downloads and update the list.
     void refresh();
 
+    // Persist current column widths/visibility into the DB.
+    void save_columns();
+
     // The currently-displayed snapshot, used by the model.
     struct Row {
         int id;

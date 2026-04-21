@@ -416,7 +416,13 @@ void MainFrame::on_quit(wxCommandEvent &)
 
 void MainFrame::on_close(wxCloseEvent &)
 {
-    // Save perspective before tearing down
+    // Persist per-panel column widths/visibility before the panels die.
+    if (list_)      list_->save_columns();
+    if (feeds_)     feeds_->save_columns();
+    if (log_)       log_->save_columns();
+    if (downloads_) downloads_->save_columns();
+
+    // Save the AUI perspective last (covers pane positions).
     wxString persp = mgr_.SavePerspective();
     db_save_ui_state(app_, "layout", persp.utf8_string().c_str());
     mgr_.UnInit();

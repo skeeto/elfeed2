@@ -91,12 +91,12 @@ EntryList::EntryList(wxWindow *parent, Elfeed *app)
 {
     AssociateModel(model_.get());
 
-    // Column flags: REORDERABLE lets users drag headers; allowing
-    // columns to be HIDDEN lets the right-click header context menu
-    // expose a per-column visibility checkbox.
+    // wxDATAVIEW_COL_HIDDEN is a STATE flag — setting it at construction
+    // would make every column start hidden. We just want resizable +
+    // reorderable; visibility is handled by the right-click menu we
+    // pop ourselves below.
     const int col_flags = wxDATAVIEW_COL_RESIZABLE |
-                          wxDATAVIEW_COL_REORDERABLE |
-                          wxDATAVIEW_COL_HIDDEN;
+                          wxDATAVIEW_COL_REORDERABLE;
 
     AppendTextColumn("Date",  0, wxDATAVIEW_CELL_INERT,
                      FromDIP(90),  wxALIGN_LEFT, col_flags);
@@ -106,6 +106,22 @@ EntryList::EntryList(wxWindow *parent, Elfeed *app)
                      FromDIP(150), wxALIGN_LEFT, col_flags);
     AppendTextColumn("Tags",  3, wxDATAVIEW_CELL_INERT,
                      FromDIP(120), wxALIGN_LEFT, col_flags);
+
+    // Restore saved column widths/visibility from the DB.
+    dataview_apply_columns(this, db_load_ui_state(app_, "cols.entry_list"));
+
+    // Provide our own column-visibility menu — wxDataViewCtrl exposes
+    // the right-click event but doesn't pop a menu by default.
+    Bind(wxEVT_DATAVIEW_COLUMN_HEADER_RIGHT_CLICK,
+         [this](wxDataViewEvent &) {
+             dataview_show_column_menu(this, [this] { save_columns(); });
+         });
+}
+
+void EntryList::save_columns()
+{
+    db_save_ui_state(app_, "cols.entry_list",
+                     dataview_serialize_columns(this).c_str());
 }
 
 void EntryList::refresh_items()

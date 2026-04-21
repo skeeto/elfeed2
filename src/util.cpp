@@ -1,13 +1,17 @@
 #include "util.hpp"
 
 #include <wx/app.h>
+#include <wx/dataview.h>
 #include <wx/datetime.h>
 #include <wx/filename.h>
+#include <wx/menu.h>
 #include <wx/stdpaths.h>
 #include <wx/utils.h>
 
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
+#include <unordered_map>
 
 // Ensure wxStandardPaths uses XDG layout on Linux/BSD; on macOS and
 // Windows this is a no-op.
@@ -252,4 +256,79 @@ double parse_rfc822(const std::string &s)
     // wxDateTime::ParseRfc822Date honors the timezone suffix in the
     // input string; GetTicks() returns UTC epoch seconds.
     return (double)dt.GetTicks();
+}
+
+// ---- wxDataViewCtrl column persistence ---------------------------
+
+// Format: comma-separated entries, each "Title=Width:Hidden". Title is
+// the column's wxString title (assumed not to contain ',', '=', or
+// ':' — true for all our columns). Hidden is "0" or "1".
+
+std::string dataview_serialize_columns(wxDataViewCtrl *ctrl)
+{
+    std::string out;
+    for (unsigned i = 0; i < ctrl->GetColumnCount(); i++) {
+        auto *col = ctrl->GetColumn(i);
+        if (!out.empty()) out += ',';
+        out += col->GetTitle().utf8_string();
+        out += '=';
+        out += std::to_string(col->GetWidth());
+        out += ':';
+        out += col->IsHidden() ? '1' : '0';
+    }
+    return out;
+}
+
+void dataview_apply_columns(wxDataViewCtrl *ctrl, const std::string &saved)
+{
+    if (saved.empty()) return;
+
+    std::unordered_map<std::string, std::pair<int, bool>> by_title;
+    size_t pos = 0;
+    while (pos < saved.size()) {
+        size_t comma = saved.find(',', pos);
+        if (comma == std::string::npos) comma = saved.size();
+        std::string item = saved.substr(pos, comma - pos);
+        pos = comma + 1;
+
+        auto eq = item.find('=');
+        if (eq == std::string::npos) continue;
+        std::string title = item.substr(0, eq);
+        std::string rest = item.substr(eq + 1);
+        auto colon = rest.find(':');
+        if (colon == std::string::npos) continue;
+        int width = std::atoi(rest.substr(0, colon).c_str());
+        bool hidden = (rest.substr(colon + 1) == "1");
+        by_title[title] = {width, hidden};
+    }
+
+    for (unsigned i = 0; i < ctrl->GetColumnCount(); i++) {
+        auto *col = ctrl->GetColumn(i);
+        auto it = by_title.find(col->GetTitle().utf8_string());
+        if (it == by_title.end()) continue;
+        if (it->second.first > 0) col->SetWidth(it->second.first);
+        col->SetHidden(it->second.second);
+    }
+}
+
+void dataview_show_column_menu(wxDataViewCtrl *ctrl,
+                               const std::function<void()> &on_change)
+{
+    wxMenu menu;
+    const int base_id = wxID_HIGHEST + 100;
+    for (unsigned i = 0; i < ctrl->GetColumnCount(); i++) {
+        auto *col = ctrl->GetColumn(i);
+        auto *item = menu.AppendCheckItem(base_id + (int)i, col->GetTitle());
+        item->Check(!col->IsHidden());
+    }
+    menu.Bind(wxEVT_MENU,
+              [ctrl, base_id, on_change](wxCommandEvent &e) {
+                  unsigned idx = (unsigned)(e.GetId() - base_id);
+                  if (idx < ctrl->GetColumnCount()) {
+                      auto *col = ctrl->GetColumn(idx);
+                      col->SetHidden(!col->IsHidden());
+                      if (on_change) on_change();
+                  }
+              });
+    ctrl->PopupMenu(&menu);
 }

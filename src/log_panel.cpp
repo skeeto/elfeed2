@@ -99,8 +99,7 @@ LogPanel::LogPanel(wxWindow *parent, Elfeed *app)
     list_->AssociateModel(model_.get());
 
     const int col_flags = wxDATAVIEW_COL_RESIZABLE |
-                          wxDATAVIEW_COL_REORDERABLE |
-                          wxDATAVIEW_COL_HIDDEN;
+                          wxDATAVIEW_COL_REORDERABLE;
     list_->AppendTextColumn("Time",   0, wxDATAVIEW_CELL_INERT,
                             FromDIP(140), wxALIGN_LEFT, col_flags);
     list_->AppendTextColumn("Type",   1, wxDATAVIEW_CELL_INERT,
@@ -109,6 +108,12 @@ LogPanel::LogPanel(wxWindow *parent, Elfeed *app)
                             FromDIP(250), wxALIGN_LEFT, col_flags);
     list_->AppendTextColumn("Result", 3, wxDATAVIEW_CELL_INERT,
                             FromDIP(400), wxALIGN_LEFT, col_flags);
+    dataview_apply_columns(list_, db_load_ui_state(app_, "cols.log"));
+    list_->Bind(wxEVT_DATAVIEW_COLUMN_HEADER_RIGHT_CLICK,
+                [this](wxDataViewEvent &) {
+                    dataview_show_column_menu(list_,
+                                              [this] { save_columns(); });
+                });
     vsz->Add(list_, 1, wxEXPAND);
 
     SetSizer(vsz);
@@ -165,4 +170,10 @@ void LogPanel::on_clear(wxCommandEvent &)
         app_->log.clear();
     }
     refresh();
+}
+
+void LogPanel::save_columns()
+{
+    db_save_ui_state(app_, "cols.log",
+                     dataview_serialize_columns(list_).c_str());
 }

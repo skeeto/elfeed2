@@ -49,19 +49,30 @@ FeedsPanel::FeedsPanel(wxWindow *parent, Elfeed *app,
     list_->AssociateModel(model_.get());
 
     const int col_flags = wxDATAVIEW_COL_RESIZABLE |
-                          wxDATAVIEW_COL_REORDERABLE |
-                          wxDATAVIEW_COL_HIDDEN;
+                          wxDATAVIEW_COL_REORDERABLE;
     list_->AppendTextColumn("Title",   0, wxDATAVIEW_CELL_INERT,
                             FromDIP(200), wxALIGN_LEFT, col_flags);
     list_->AppendTextColumn("Updated", 1, wxDATAVIEW_CELL_INERT,
                             FromDIP(90),  wxALIGN_LEFT, col_flags);
+    dataview_apply_columns(list_, db_load_ui_state(app_, "cols.feeds"));
     sz->Add(list_, 1, wxEXPAND);
     SetSizer(sz);
 
     list_->Bind(wxEVT_DATAVIEW_ITEM_ACTIVATED,
                 &FeedsPanel::on_activated, this);
+    list_->Bind(wxEVT_DATAVIEW_COLUMN_HEADER_RIGHT_CLICK,
+                [this](wxDataViewEvent &) {
+                    dataview_show_column_menu(list_,
+                                              [this] { save_columns(); });
+                });
 
     refresh();
+}
+
+void FeedsPanel::save_columns()
+{
+    db_save_ui_state(app_, "cols.feeds",
+                     dataview_serialize_columns(list_).c_str());
 }
 
 void FeedsPanel::refresh()
