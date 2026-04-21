@@ -1,18 +1,31 @@
-// Download manager built on wxProcess. All state is UI-thread-local:
-// wxExecute() is asynchronous, its child-termination events are
-// delivered on the UI thread via wxProcess::OnTerminate, and a wxTimer
-// drains the child's stdout at 200 ms intervals so progress updates
-// reach the UI promptly.
+// Download manager. Two dispatch paths that share the DownloadItem
+// queue and the Downloads UI:
+//
+//   DownloadKind::Subprocess -> yt-dlp / curl via wxProcess. All state
+//     on the UI thread, driven by wxProcess::OnTerminate + a wxTimer
+//     that polls the child's stdout.
+//
+//   DownloadKind::HttpDirect -> a std::thread running http_download()
+//     into a chosen file path. Communicates with the UI via atomics
+//     and app_wake_ui(); the UI thread reaps finished workers from
+//     download_tick().
 
 #include "elfeed.hpp"
 
+#include "http.hpp"
+
+#include <wx/ffile.h>
 #include <wx/process.h>
 #include <wx/stream.h>
 #include <wx/timer.h>
 #include <wx/utils.h>
 
 #include <algorithm>
+#include <atomic>
+#include <cstdio>
+#include <memory>
 #include <regex>
+#include <thread>
 
 // Find the next item to run: highest (priority - failures), not paused,
 // not over max failures (5).
@@ -32,6 +45,8 @@ static DownloadItem *pick_next(std::vector<DownloadItem> &items)
     return best;
 }
 
+// ---- Subprocess path (yt-dlp / curl via wxProcess) -------------------
+
 namespace {
 
 class DownloadProcess : public wxProcess {
@@ -45,25 +60,14 @@ public:
         Bind(wxEVT_TIMER, &DownloadProcess::on_timer, this);
     }
 
-    // Called once right after a successful wxExecute so we can start
-    // polling the child's stdout stream.
-    void begin(long pid)
-    {
-        pid_ = pid;
-        timer_.Start(200);
-    }
+    void begin(long pid) { pid_ = pid; timer_.Start(200); }
 
-    // Send SIGTERM to the child. If `paused` is true, OnTerminate will
-    // treat the non-zero exit as an intentional pause rather than a
-    // failure.
     void kill(bool paused)
     {
         paused_ = paused;
         if (pid_ > 0) wxProcess::Kill(pid_, wxSIGTERM);
     }
 
-    // wxProcess fires this on the UI thread when the child exits.
-    // wxProcess self-deletes after this returns.
     void OnTerminate(int /*pid*/, int status) override
     {
         timer_.Stop();
@@ -74,8 +78,6 @@ public:
 private:
     void on_timer(wxTimerEvent &) { drain(); }
 
-    // Read whatever's available from the child's stdout (and stderr),
-    // split into complete lines, and dispatch each line.
     void drain()
     {
         drain_stream(GetInputStream(), true);
@@ -115,9 +117,8 @@ private:
                         d.progress = m[1].str();
                         d.total = m[2].str();
                     }
-                    if (std::regex_search(line, m, dest_re)) {
+                    if (std::regex_search(line, m, dest_re))
                         d.destination = m[1].str();
-                    }
                 }
                 break;
             }
@@ -157,7 +158,151 @@ private:
     bool paused_ = false;
 };
 
+// ---- HTTP-direct path ------------------------------------------------
+
+struct HttpJob {
+    int item_id = 0;
+    std::string dest;
+    std::thread thread;
+
+    // Worker → UI
+    std::atomic<uint64_t> cur{0};
+    std::atomic<uint64_t> total{0};
+    std::atomic<bool>     finished{false};
+
+    // UI → worker
+    std::atomic<bool>     cancelled{false};
+
+    // Written on the worker before `finished` flips; only read after.
+    int         status = 0;
+    std::string error;
+};
+
+static std::unique_ptr<HttpJob> g_http;
+
+static std::string format_bytes(uint64_t n)
+{
+    const char *units[] = {"B", "KiB", "MiB", "GiB", "TiB"};
+    int u = 0;
+    double d = (double)n;
+    while (d >= 1024 && u + 1 < (int)(sizeof(units) / sizeof(*units))) {
+        d /= 1024;
+        u++;
+    }
+    char buf[32];
+    if (u == 0) snprintf(buf, sizeof(buf), "%llu%s",
+                         (unsigned long long)n, units[u]);
+    else        snprintf(buf, sizeof(buf), "%.1f%s", d, units[u]);
+    return buf;
+}
+
+static void http_worker(Elfeed *app, HttpJob *job, std::string url)
+{
+    // Make sure http_init() has run — it initializes the CA bundle on
+    // POSIX. Cheap if already done.
+    http_init();
+
+    wxFFile out;
+    if (!out.Open(wxString::FromUTF8(job->dest), "wb")) {
+        job->error = "cannot open output file: " + job->dest;
+        job->finished = true;
+        app_wake_ui(app);
+        return;
+    }
+
+    HttpDownloadRequest req;
+    req.url = std::move(url);
+    char ua[64];
+    snprintf(ua, sizeof(ua), "Elfeed2/%s", ELFEED_VERSION);
+    req.user_agent = ua;
+
+    req.write = [&out, job](const char *data, size_t n) -> bool {
+        if (job->cancelled.load()) return false;
+        if (out.Write(data, n) != n || out.Error()) return false;
+        return true;
+    };
+    req.progress = [job, app](uint64_t cur, uint64_t total) -> bool {
+        if (job->cancelled.load()) return false;
+        job->cur.store(cur);
+        job->total.store(total);
+        app_wake_ui(app);
+        return true;
+    };
+
+    HttpDownloadResult res = http_download(req);
+    out.Close();
+
+    if (res.cancelled) {
+        job->error = "cancelled";
+    } else if (!res.error.empty()) {
+        job->error = res.error;
+    } else if (res.status < 200 || res.status >= 300) {
+        char buf[64];
+        snprintf(buf, sizeof(buf), "HTTP %d", res.status);
+        job->error = buf;
+    }
+    job->status = res.status;
+
+    job->finished = true;
+    app_wake_ui(app);
+}
+
+// Called from the UI thread at each on_wake. Reads worker-published
+// atomics into the matching DownloadItem and, if the worker is done,
+// joins the thread and finalizes the queue state.
+static void http_pump(Elfeed *app)
+{
+    if (!g_http) return;
+
+    DownloadItem *item = nullptr;
+    for (auto &d : app->downloads) {
+        if (d.id == g_http->item_id) { item = &d; break; }
+    }
+
+    // Publish current progress even for running jobs.
+    if (item) {
+        uint64_t cur = g_http->cur.load();
+        uint64_t tot = g_http->total.load();
+        if (tot > 0) {
+            double pct = 100.0 * (double)cur / (double)tot;
+            char buf[16];
+            snprintf(buf, sizeof(buf), "%.1f%%", pct);
+            item->progress = buf;
+            item->total = format_bytes(tot);
+        } else if (cur > 0) {
+            item->progress = format_bytes(cur);
+            item->total.clear();
+        }
+    }
+
+    if (!g_http->finished.load()) return;
+
+    if (g_http->thread.joinable()) g_http->thread.join();
+
+    if (g_http->error.empty() && g_http->status >= 200 && g_http->status < 300) {
+        // Success: drop the item from the queue.
+        int id = g_http->item_id;
+        app->downloads.erase(
+            std::remove_if(app->downloads.begin(), app->downloads.end(),
+                           [id](auto &d) { return d.id == id; }),
+            app->downloads.end());
+    } else if (item) {
+        if (g_http->error != "cancelled") {
+            item->failures++;
+            item->log.push_back(g_http->error.empty()
+                                    ? "HTTP download failed"
+                                    : g_http->error);
+        }
+        item->progress.clear();
+    }
+
+    app->download_active_id = 0;
+    g_http.reset();
+}
+
 } // anonymous namespace
+
+// ---- Public API ------------------------------------------------------
 
 void download_enqueue(Elfeed *app, const std::string &url,
                       const std::string &title, bool is_video)
@@ -168,19 +313,50 @@ void download_enqueue(Elfeed *app, const std::string &url,
     item.title = title;
     item.is_video = is_video;
     item.directory = app->download_dir;
+    item.kind = DownloadKind::Subprocess;
+    app->downloads.push_back(std::move(item));
+}
+
+void download_enqueue_http(Elfeed *app, const std::string &url,
+                           const std::string &title,
+                           const std::string &output_path)
+{
+    DownloadItem item;
+    item.id = app->download_next_id++;
+    item.url = url;
+    item.title = title;
+    item.output_path = output_path;
+    item.kind = DownloadKind::HttpDirect;
     app->downloads.push_back(std::move(item));
 }
 
 void download_tick(Elfeed *app)
 {
+    // First, pump the HTTP worker — this covers both progress updates
+    // and the transition to done.
+    http_pump(app);
+
     if (app->download_active_id != 0) return;
     if (app->downloads.empty()) return;
 
     DownloadItem *next = pick_next(app->downloads);
     if (!next) return;
 
-    // Build argv. argv_owned holds the backing strings; argv is a
-    // NULL-terminated array of c_str pointers into argv_owned.
+    if (next->kind == DownloadKind::HttpDirect) {
+        g_http = std::make_unique<HttpJob>();
+        g_http->item_id = next->id;
+        g_http->dest = next->output_path;
+
+        app->download_active_id = next->id;
+        std::string url = next->url;  // copy before thread launch
+        HttpJob *job = g_http.get();
+        g_http->thread = std::thread([app, job, url = std::move(url)]() {
+            http_worker(app, job, url);
+        });
+        return;
+    }
+
+    // Subprocess path (yt-dlp / curl).
     std::vector<std::string> argv_owned;
     if (next->is_video) {
         argv_owned.push_back(app->ytdlp_program);
@@ -222,8 +398,6 @@ void download_tick(Elfeed *app)
                          proc, &env);
 
     if (pid == 0) {
-        // wxExecute failure; wxProcess must be deleted manually since
-        // no OnTerminate will fire.
         delete proc;
         for (auto &d : app->downloads) {
             if (d.id != next->id) continue;
@@ -241,8 +415,16 @@ void download_tick(Elfeed *app)
 
 void download_remove(Elfeed *app, int id)
 {
-    if (id == app->download_active_id && app->download_process) {
-        static_cast<DownloadProcess *>(app->download_process)->kill(false);
+    if (id == app->download_active_id) {
+        if (app->download_process) {
+            static_cast<DownloadProcess *>(app->download_process)->kill(false);
+        } else if (g_http && g_http->item_id == id) {
+            g_http->cancelled = true;
+            // Worker will finish shortly; http_pump() will reap it. For
+            // the synchronous remove we just let the item go — the
+            // worker won't touch it after it's gone (it only reads the
+            // cancelled flag and writes to its own file).
+        }
     }
     app->downloads.erase(
         std::remove_if(app->downloads.begin(), app->downloads.end(),
@@ -255,8 +437,13 @@ void download_pause(Elfeed *app, int id)
     for (auto &d : app->downloads) {
         if (d.id != id) continue;
         d.paused = !d.paused;
-        if (d.paused && id == app->download_active_id && app->download_process) {
-            static_cast<DownloadProcess *>(app->download_process)->kill(true);
+        if (d.paused && id == app->download_active_id) {
+            if (app->download_process) {
+                static_cast<DownloadProcess *>(app->download_process)
+                    ->kill(true);
+            } else if (g_http && g_http->item_id == id) {
+                g_http->cancelled = true;
+            }
         }
         break;
     }
@@ -264,12 +451,15 @@ void download_pause(Elfeed *app, int id)
 
 void download_stop(Elfeed *app)
 {
-    // Called from elfeed_shutdown. The wx event loop is on its way out
-    // so OnTerminate may not fire; send SIGTERM and let the OS reap.
-    // yt-dlp leaves a resumable partial file behind, which is fine.
     if (app->download_process) {
         static_cast<DownloadProcess *>(app->download_process)->kill(false);
         app->download_process = nullptr;
+        app->download_active_id = 0;
+    }
+    if (g_http) {
+        g_http->cancelled = true;
+        if (g_http->thread.joinable()) g_http->thread.join();
+        g_http.reset();
         app->download_active_id = 0;
     }
 }

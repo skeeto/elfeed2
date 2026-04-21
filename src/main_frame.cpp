@@ -605,14 +605,31 @@ void MainFrame::action_download()
     for (long i : sel) {
         if (i < 0 || (size_t)i >= app_->entries.size()) continue;
         Entry &e = app_->entries[(size_t)i];
-        for (auto &enc : e.enclosures) {
-            bool video = enc.type.find("video") != std::string::npos ||
-                enc.url.find("youtube") != std::string::npos ||
-                enc.url.find("youtu.be") != std::string::npos;
-            download_enqueue(app_, enc.url, e.title, video);
+
+        if (!e.enclosures.empty()) {
+            // Enclosure present (e.g. podcast): download the first one
+            // directly via our HTTP stack with a filename we control.
+            const Enclosure &enc = e.enclosures.front();
+            std::string feed_title;
+            for (auto &f : app_->feeds) {
+                if (f.url == e.feed_url) { feed_title = f.title; break; }
+            }
+            std::string base = format_date_compact(e.date);
+            std::string ft = sanitize_filename(feed_title);
+            std::string et = sanitize_filename(e.title);
+            if (!ft.empty()) base += "-" + ft;
+            if (!et.empty()) base += "-" + et;
+            std::string ext = mime_to_extension(enc.type, enc.url);
+            std::string dir = app_->download_dir.empty()
+                                  ? user_home_dir() + "/Downloads"
+                                  : app_->download_dir;
+            make_directory(dir);
+            std::string path = disambiguate_path(dir, base, ext);
+            download_enqueue_http(app_, enc.url, e.title, path);
+        } else {
+            // No enclosure — hand off to yt-dlp as before.
+            download_enqueue(app_, e.link, e.title, /*is_video=*/true);
         }
-        if (e.enclosures.empty())
-            download_enqueue(app_, e.link, e.title, true);
         strip_unread(e, app_);
     }
     list_->refresh_items();

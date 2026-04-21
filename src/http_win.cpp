@@ -196,3 +196,119 @@ HttpResponse http_fetch(const HttpRequest &req)
     WinHttpCloseHandle(session);
     return out;
 }
+
+// --- Streaming download -----------------------------------------------
+
+HttpDownloadResult http_download(const HttpDownloadRequest &req)
+{
+    HttpDownloadResult out;
+
+    auto wurl = to_wide(req.url);
+    URL_COMPONENTS uc{};
+    uc.dwStructSize = sizeof(uc);
+    uc.dwHostNameLength  = DWORD(-1);
+    uc.dwUrlPathLength   = DWORD(-1);
+    uc.dwExtraInfoLength = DWORD(-1);
+    uc.dwSchemeLength    = DWORD(-1);
+    if (!WinHttpCrackUrl(wurl.c_str(), (DWORD)wurl.size(), 0, &uc)) {
+        out.error = "bad URL: " + win_error(GetLastError());
+        return out;
+    }
+    std::wstring host(uc.lpszHostName, uc.dwHostNameLength);
+    std::wstring path(uc.lpszUrlPath, uc.dwUrlPathLength);
+    if (uc.dwExtraInfoLength)
+        path.append(uc.lpszExtraInfo, uc.dwExtraInfoLength);
+    if (path.empty()) path = L"/";
+    bool is_https = (uc.nScheme == INTERNET_SCHEME_HTTPS);
+    INTERNET_PORT port = uc.nPort;
+
+    auto wua = to_wide(req.user_agent.empty() ? std::string("elfeed2")
+                                              : req.user_agent);
+    HINTERNET session = WinHttpOpen(wua.c_str(),
+                                    WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
+                                    WINHTTP_NO_PROXY_NAME,
+                                    WINHTTP_NO_PROXY_BYPASS, 0);
+    if (!session) {
+        out.error = "WinHttpOpen: " + win_error(GetLastError());
+        return out;
+    }
+    if (req.timeout_seconds > 0) {
+        DWORD ms = (DWORD)req.timeout_seconds * 1000;
+        WinHttpSetTimeouts(session, ms, ms, ms, ms);
+    }
+    DWORD max_redirs = (DWORD)req.max_redirects;
+    WinHttpSetOption(session, WINHTTP_OPTION_MAX_HTTP_AUTOMATIC_REDIRECTS,
+                     &max_redirs, sizeof(max_redirs));
+
+    HINTERNET conn = WinHttpConnect(session, host.c_str(), port, 0);
+    if (!conn) {
+        out.error = "WinHttpConnect: " + win_error(GetLastError());
+        WinHttpCloseHandle(session);
+        return out;
+    }
+
+    DWORD flags = is_https ? WINHTTP_FLAG_SECURE : 0;
+    HINTERNET hreq = WinHttpOpenRequest(conn, L"GET", path.c_str(),
+                                        nullptr, WINHTTP_NO_REFERER,
+                                        WINHTTP_DEFAULT_ACCEPT_TYPES, flags);
+    if (!hreq) {
+        out.error = "WinHttpOpenRequest: " + win_error(GetLastError());
+        WinHttpCloseHandle(conn);
+        WinHttpCloseHandle(session);
+        return out;
+    }
+
+    if (!WinHttpSendRequest(hreq, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
+                            WINHTTP_NO_REQUEST_DATA, 0, 0, 0) ||
+        !WinHttpReceiveResponse(hreq, nullptr)) {
+        out.error = "WinHttp: " + win_error(GetLastError());
+        WinHttpCloseHandle(hreq);
+        WinHttpCloseHandle(conn);
+        WinHttpCloseHandle(session);
+        return out;
+    }
+
+    DWORD status = 0, status_size = sizeof(status);
+    WinHttpQueryHeaders(hreq,
+                        WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
+                        WINHTTP_HEADER_NAME_BY_INDEX,
+                        &status, &status_size, WINHTTP_NO_HEADER_INDEX);
+    out.status = (int)status;
+
+    uint64_t total = 0;
+    {
+        DWORD len_bytes = 0, size = sizeof(len_bytes);
+        if (WinHttpQueryHeaders(
+                hreq,
+                WINHTTP_QUERY_CONTENT_LENGTH | WINHTTP_QUERY_FLAG_NUMBER,
+                WINHTTP_HEADER_NAME_BY_INDEX,
+                &len_bytes, &size, WINHTTP_NO_HEADER_INDEX)) {
+            total = (uint64_t)len_bytes;
+        }
+    }
+
+    DWORD avail = 0;
+    while (WinHttpQueryDataAvailable(hreq, &avail)) {
+        if (avail == 0) break;  // end of stream
+        std::vector<char> buf(avail);
+        DWORD got = 0;
+        if (!WinHttpReadData(hreq, buf.data(), avail, &got)) {
+            out.error = "WinHttpReadData: " + win_error(GetLastError());
+            break;
+        }
+        if (req.write && !req.write(buf.data(), got)) {
+            out.cancelled = true;
+            break;
+        }
+        out.bytes += got;
+        if (req.progress && !req.progress(out.bytes, total)) {
+            out.cancelled = true;
+            break;
+        }
+    }
+
+    WinHttpCloseHandle(hreq);
+    WinHttpCloseHandle(conn);
+    WinHttpCloseHandle(session);
+    return out;
+}

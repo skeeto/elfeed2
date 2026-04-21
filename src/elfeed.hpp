@@ -68,17 +68,26 @@ struct Filter {
 
 // --- Download manager ---
 
+enum class DownloadKind {
+    Subprocess,   // yt-dlp (is_video) or curl (default) via wxProcess
+    HttpDirect,   // our own http_download() into output_path
+};
+
 struct DownloadItem {
     int id = 0;
     std::string url;
     std::string title;
     std::string directory;
     std::string destination;
+    // Full absolute path for HttpDirect kind, chosen at enqueue time.
+    // Unused by subprocess downloads (they write wherever yt-dlp picks).
+    std::string output_path;
     int failures = 0;
     int priority = 0;
     std::string progress;
     std::string total;
     std::vector<std::string> log;
+    DownloadKind kind = DownloadKind::Subprocess;
     bool paused = false;
     bool slow = false;
     bool is_video = false;
@@ -200,6 +209,12 @@ Filter filter_parse(const std::string &expr);
 // Downloads
 void download_enqueue(Elfeed *app, const std::string &url,
                       const std::string &title, bool is_video);
+// Enqueue an HTTP-direct download (used for RSS enclosures like
+// podcasts). `output_path` is the exact destination, already
+// disambiguated by the caller.
+void download_enqueue_http(Elfeed *app, const std::string &url,
+                           const std::string &title,
+                           const std::string &output_path);
 void download_tick(Elfeed *app);
 void download_remove(Elfeed *app, int id);
 void download_pause(Elfeed *app, int id);

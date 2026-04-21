@@ -70,6 +70,146 @@ std::string format_datetime(double epoch)
     return dt.Format("%Y-%m-%d %H:%M:%S").utf8_string();
 }
 
+std::string format_date_compact(double epoch)
+{
+    if (epoch <= 0) return {};
+    wxDateTime dt((time_t)epoch);
+    return dt.Format("%Y%m%d").utf8_string();
+}
+
+// ---- Filename building --------------------------------------------
+
+std::string sanitize_filename(const std::string &s)
+{
+    std::string out;
+    out.reserve(s.size());
+    bool pending_underscore = false;
+    for (unsigned char c : s) {
+        if (c >= 'A' && c <= 'Z') {
+            if (pending_underscore) { out += '_'; pending_underscore = false; }
+            out += (char)(c | 0x20);
+        } else if ((c >= '0' && c <= '9') || (c >= 'a' && c <= 'z')) {
+            if (pending_underscore) { out += '_'; pending_underscore = false; }
+            out += (char)c;
+        } else if (c >= 0x80) {
+            if (pending_underscore) { out += '_'; pending_underscore = false; }
+            out += (char)c;
+        } else {
+            pending_underscore = true;
+        }
+    }
+    // Trim leading / trailing '_'. (Trailing was never emitted because
+    // pending_underscore is dropped at end-of-input; leading may have
+    // slipped through if the string started with non-alnum ASCII.)
+    size_t b = 0, e = out.size();
+    while (b < e && out[b] == '_') ++b;
+    while (e > b && out[e - 1] == '_') --e;
+    return out.substr(b, e - b);
+}
+
+static std::string lower_ascii(const std::string &s)
+{
+    std::string out = s;
+    for (auto &c : out) if (c >= 'A' && c <= 'Z') c = (char)(c | 0x20);
+    return out;
+}
+
+std::string mime_to_extension(const std::string &mime_type,
+                              const std::string &url_fallback)
+{
+    // Strip parameters after ';' and whitespace, lowercase.
+    std::string mime = mime_type;
+    auto semi = mime.find(';');
+    if (semi != std::string::npos) mime.resize(semi);
+    while (!mime.empty() && (mime.back() == ' ' || mime.back() == '\t'))
+        mime.pop_back();
+    mime = lower_ascii(mime);
+
+    struct Row { const char *type; const char *ext; };
+    static const Row table[] = {
+        // audio
+        {"audio/mpeg",           "mp3"},
+        {"audio/mp3",            "mp3"},
+        {"audio/mp4",            "m4a"},
+        {"audio/x-m4a",          "m4a"},
+        {"audio/aac",            "aac"},
+        {"audio/ogg",            "ogg"},
+        {"audio/opus",           "opus"},
+        {"audio/flac",           "flac"},
+        {"audio/wav",            "wav"},
+        {"audio/x-wav",          "wav"},
+        {"audio/webm",           "webm"},
+        // video
+        {"video/mp4",            "mp4"},
+        {"video/mpeg",           "mpeg"},
+        {"video/webm",           "webm"},
+        {"video/quicktime",      "mov"},
+        {"video/x-matroska",     "mkv"},
+        // application
+        {"application/pdf",      "pdf"},
+        {"application/zip",      "zip"},
+        {"application/epub+zip", "epub"},
+        {"application/x-tar",    "tar"},
+        {"application/gzip",     "gz"},
+        // images
+        {"image/jpeg",           "jpg"},
+        {"image/png",            "png"},
+        {"image/gif",            "gif"},
+        {"image/webp",           "webp"},
+        {"image/svg+xml",        "svg"},
+    };
+    for (auto &r : table) if (mime == r.type) return r.ext;
+
+    // Fallback: tail of URL path before any ? or #.
+    if (!url_fallback.empty()) {
+        size_t end = url_fallback.size();
+        for (size_t i = 0; i < end; i++) {
+            if (url_fallback[i] == '?' || url_fallback[i] == '#') {
+                end = i;
+                break;
+            }
+        }
+        size_t dot = url_fallback.rfind('.', end);
+        if (dot != std::string::npos && end - dot - 1 > 0 &&
+            end - dot - 1 <= 5) {
+            std::string ext = url_fallback.substr(dot + 1, end - dot - 1);
+            bool ok = !ext.empty();
+            for (char c : ext) {
+                if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                      (c >= '0' && c <= '9'))) {
+                    ok = false;
+                    break;
+                }
+            }
+            if (ok) return lower_ascii(ext);
+        }
+    }
+    return "bin";
+}
+
+std::string disambiguate_path(const std::string &dir,
+                              const std::string &base,
+                              const std::string &ext)
+{
+    auto compose = [&](int n) -> std::string {
+        std::string s = dir;
+        if (!s.empty() && s.back() != '/') s += '/';
+        s += base;
+        if (n > 0) s += " (" + std::to_string(n) + ")";
+        if (!ext.empty()) { s += '.'; s += ext; }
+        return s;
+    };
+    std::string path = compose(0);
+    if (!wxFileName::FileExists(wxString::FromUTF8(path))) return path;
+    for (int n = 1; n < 1000; n++) {
+        std::string candidate = compose(n);
+        if (!wxFileName::FileExists(wxString::FromUTF8(candidate)))
+            return candidate;
+    }
+    // Give up and overwrite — caller will just open whatever's there.
+    return path;
+}
+
 // Compute UTC epoch seconds from Gregorian (Y, M, D, h, m, s) without
 // any platform's timegm(). Uses std::chrono's civil-calendar routines,
 // which are guaranteed UTC and need no timezone data.

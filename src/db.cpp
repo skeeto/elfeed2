@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <ctime>
 #include <regex>
@@ -30,8 +31,6 @@ CREATE TABLE IF NOT EXISTS entry (
     date         REAL NOT NULL,
     content      TEXT,
     content_type TEXT,
-    author       TEXT,
-    enclosures   TEXT,
     PRIMARY KEY (namespace, id)
 );
 
@@ -47,6 +46,28 @@ CREATE TABLE IF NOT EXISTS entry_tag (
 );
 
 CREATE INDEX IF NOT EXISTS idx_tag ON entry_tag(tag);
+
+CREATE TABLE IF NOT EXISTS entry_author (
+    namespace TEXT NOT NULL,
+    entry_id  TEXT NOT NULL,
+    seq       INTEGER NOT NULL,   -- preserves source order
+    name      TEXT,
+    email     TEXT,
+    uri       TEXT,
+    PRIMARY KEY (namespace, entry_id, seq),
+    FOREIGN KEY (namespace, entry_id) REFERENCES entry(namespace, id)
+);
+
+CREATE TABLE IF NOT EXISTS entry_enclosure (
+    namespace TEXT NOT NULL,
+    entry_id  TEXT NOT NULL,
+    seq       INTEGER NOT NULL,
+    url       TEXT,
+    type      TEXT,
+    length    INTEGER,
+    PRIMARY KEY (namespace, entry_id, seq),
+    FOREIGN KEY (namespace, entry_id) REFERENCES entry(namespace, id)
+);
 
 CREATE TABLE IF NOT EXISTS ui_state (
     key   TEXT PRIMARY KEY,
@@ -155,27 +176,57 @@ void db_add_entries(Elfeed *app, std::vector<Entry> &entries)
 
     sqlite3_exec(app->db, "BEGIN", nullptr, nullptr, nullptr);
 
+    // Main row upsert. content/content_type can change on refetch; the
+    // primary key (namespace,id) is stable.
     const char *upsert =
         "INSERT INTO entry (namespace,id,feed_url,title,link,date,"
-        "content,content_type,author,enclosures)"
-        " VALUES (?,?,?,?,?,?,?,?,?,?)"
+        "content,content_type)"
+        " VALUES (?,?,?,?,?,?,?,?)"
         " ON CONFLICT(namespace,id) DO UPDATE SET"
         " title=excluded.title,link=excluded.link,"
         " date=excluded.date,content=excluded.content,"
-        " content_type=excluded.content_type,"
-        " author=excluded.author,enclosures=excluded.enclosures";
-    sqlite3_stmt *stmt;
-    if (sqlite3_prepare_v2(app->db, upsert, -1, &stmt, nullptr) != SQLITE_OK) {
-        sqlite3_exec(app->db, "ROLLBACK", nullptr, nullptr, nullptr);
-        return;
-    }
+        " content_type=excluded.content_type";
 
+    // For tags we INSERT OR IGNORE so user-applied tags (e.g. read/unread
+    // toggled on a previously-fetched entry) survive a refetch.
     const char *tag_sql =
         "INSERT OR IGNORE INTO entry_tag (namespace,entry_id,tag)"
         " VALUES (?,?,?)";
-    sqlite3_stmt *tag_stmt;
-    if (sqlite3_prepare_v2(app->db, tag_sql, -1, &tag_stmt, nullptr) != SQLITE_OK) {
-        sqlite3_finalize(stmt);
+
+    // Authors and enclosures come from the feed; refresh on each write
+    // by wiping the existing rows for this (namespace,entry_id) and
+    // re-inserting. This lets a re-fetched entry swap its author list
+    // without leaving stale rows behind.
+    const char *author_del =
+        "DELETE FROM entry_author WHERE namespace=? AND entry_id=?";
+    const char *author_ins =
+        "INSERT INTO entry_author (namespace,entry_id,seq,name,email,uri)"
+        " VALUES (?,?,?,?,?,?)";
+    const char *enc_del =
+        "DELETE FROM entry_enclosure WHERE namespace=? AND entry_id=?";
+    const char *enc_ins =
+        "INSERT INTO entry_enclosure (namespace,entry_id,seq,url,type,length)"
+        " VALUES (?,?,?,?,?,?)";
+
+    sqlite3_stmt *stmt = nullptr;
+    sqlite3_stmt *tag_stmt = nullptr;
+    sqlite3_stmt *auth_del_stmt = nullptr;
+    sqlite3_stmt *auth_ins_stmt = nullptr;
+    sqlite3_stmt *enc_del_stmt = nullptr;
+    sqlite3_stmt *enc_ins_stmt = nullptr;
+
+    auto prep = [&](const char *sql, sqlite3_stmt **out) {
+        return sqlite3_prepare_v2(app->db, sql, -1, out, nullptr) == SQLITE_OK;
+    };
+    if (!prep(upsert, &stmt) || !prep(tag_sql, &tag_stmt) ||
+        !prep(author_del, &auth_del_stmt) || !prep(author_ins, &auth_ins_stmt) ||
+        !prep(enc_del, &enc_del_stmt) || !prep(enc_ins, &enc_ins_stmt)) {
+        if (stmt)          sqlite3_finalize(stmt);
+        if (tag_stmt)      sqlite3_finalize(tag_stmt);
+        if (auth_del_stmt) sqlite3_finalize(auth_del_stmt);
+        if (auth_ins_stmt) sqlite3_finalize(auth_ins_stmt);
+        if (enc_del_stmt)  sqlite3_finalize(enc_del_stmt);
+        if (enc_ins_stmt)  sqlite3_finalize(enc_ins_stmt);
         sqlite3_exec(app->db, "ROLLBACK", nullptr, nullptr, nullptr);
         return;
     }
@@ -196,9 +247,6 @@ void db_add_entries(Elfeed *app, std::vector<Entry> &entries)
             sqlite3_bind_text(stmt, 8, e.content_type.c_str(), -1, SQLITE_TRANSIENT);
         else
             sqlite3_bind_null(stmt, 8);
-        // TODO: serialize authors/enclosures as JSON
-        sqlite3_bind_null(stmt, 9);
-        sqlite3_bind_null(stmt, 10);
         if (sqlite3_step(stmt) != SQLITE_DONE) {
             elfeed_log(app, LOG_ERROR, "db insert entry [%s %s]: %s",
                        e.namespace_.c_str(), e.id.c_str(),
@@ -212,9 +260,47 @@ void db_add_entries(Elfeed *app, std::vector<Entry> &entries)
             sqlite3_bind_text(tag_stmt, 3, tag.c_str(), -1, SQLITE_TRANSIENT);
             sqlite3_step(tag_stmt);
         }
+
+        // Refresh authors: delete existing, insert current list.
+        sqlite3_reset(auth_del_stmt);
+        sqlite3_bind_text(auth_del_stmt, 1, e.namespace_.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(auth_del_stmt, 2, e.id.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_step(auth_del_stmt);
+        for (size_t i = 0; i < e.authors.size(); i++) {
+            const Author &a = e.authors[i];
+            sqlite3_reset(auth_ins_stmt);
+            sqlite3_bind_text(auth_ins_stmt, 1, e.namespace_.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(auth_ins_stmt, 2, e.id.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_int (auth_ins_stmt, 3, (int)i);
+            sqlite3_bind_text(auth_ins_stmt, 4, a.name.c_str(),  -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(auth_ins_stmt, 5, a.email.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(auth_ins_stmt, 6, a.uri.c_str(),   -1, SQLITE_TRANSIENT);
+            sqlite3_step(auth_ins_stmt);
+        }
+
+        // Refresh enclosures.
+        sqlite3_reset(enc_del_stmt);
+        sqlite3_bind_text(enc_del_stmt, 1, e.namespace_.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(enc_del_stmt, 2, e.id.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_step(enc_del_stmt);
+        for (size_t i = 0; i < e.enclosures.size(); i++) {
+            const Enclosure &enc = e.enclosures[i];
+            sqlite3_reset(enc_ins_stmt);
+            sqlite3_bind_text (enc_ins_stmt, 1, e.namespace_.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text (enc_ins_stmt, 2, e.id.c_str(),         -1, SQLITE_TRANSIENT);
+            sqlite3_bind_int  (enc_ins_stmt, 3, (int)i);
+            sqlite3_bind_text (enc_ins_stmt, 4, enc.url.c_str(),  -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text (enc_ins_stmt, 5, enc.type.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_int64(enc_ins_stmt, 6, (sqlite3_int64)enc.length);
+            sqlite3_step(enc_ins_stmt);
+        }
     }
 
     sqlite3_finalize(stmt);
+    sqlite3_finalize(auth_del_stmt);
+    sqlite3_finalize(auth_ins_stmt);
+    sqlite3_finalize(enc_del_stmt);
+    sqlite3_finalize(enc_ins_stmt);
     sqlite3_finalize(tag_stmt);
     sqlite3_exec(app->db, "COMMIT", nullptr, nullptr, nullptr);
 }
@@ -228,7 +314,7 @@ void db_query_entries(Elfeed *app, const Filter &filter,
     // Build query: date range goes into SQL, regex filters applied in memory
     std::string sql =
         "SELECT e.namespace, e.id, e.feed_url, e.title, e.link, e.date,"
-        " e.content, e.content_type, e.author, e.enclosures"
+        " e.content, e.content_type"
         " FROM entry e";
 
     std::vector<std::string> where;
@@ -279,12 +365,24 @@ void db_query_entries(Elfeed *app, const Filter &filter,
     for (double d : bind_doubles)
         sqlite3_bind_double(stmt, bind_idx++, d);
 
-    // Load tags query
+    // Per-entry lookup statements (tags, authors, enclosures).
     const char *tags_sql =
         "SELECT tag FROM entry_tag WHERE namespace=? AND entry_id=? ORDER BY tag";
-    sqlite3_stmt *tags_stmt;
-    bool have_tags_stmt =
-        sqlite3_prepare_v2(app->db, tags_sql, -1, &tags_stmt, nullptr) == SQLITE_OK;
+    const char *authors_sql =
+        "SELECT name,email,uri FROM entry_author"
+        " WHERE namespace=? AND entry_id=? ORDER BY seq";
+    const char *encs_sql =
+        "SELECT url,type,length FROM entry_enclosure"
+        " WHERE namespace=? AND entry_id=? ORDER BY seq";
+    sqlite3_stmt *tags_stmt    = nullptr;
+    sqlite3_stmt *authors_stmt = nullptr;
+    sqlite3_stmt *encs_stmt    = nullptr;
+    bool have_tags =
+        sqlite3_prepare_v2(app->db, tags_sql,    -1, &tags_stmt,    nullptr) == SQLITE_OK;
+    bool have_auth =
+        sqlite3_prepare_v2(app->db, authors_sql, -1, &authors_stmt, nullptr) == SQLITE_OK;
+    bool have_encs =
+        sqlite3_prepare_v2(app->db, encs_sql,    -1, &encs_stmt,    nullptr) == SQLITE_OK;
 
     while (sqlite3_step(stmt) == SQLITE_ROW) {
         Entry e;
@@ -304,14 +402,44 @@ void db_query_entries(Elfeed *app, const Filter &filter,
         if (auto *t = (const char *)sqlite3_column_text(stmt, 7))
             e.content_type = t;
 
-        // Load tags
-        if (have_tags_stmt) {
-            sqlite3_reset(tags_stmt);
-            sqlite3_bind_text(tags_stmt, 1, e.namespace_.c_str(), -1, SQLITE_TRANSIENT);
-            sqlite3_bind_text(tags_stmt, 2, e.id.c_str(), -1, SQLITE_TRANSIENT);
+        auto bind_ns_id = [&](sqlite3_stmt *s) {
+            sqlite3_reset(s);
+            sqlite3_bind_text(s, 1, e.namespace_.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(s, 2, e.id.c_str(),         -1, SQLITE_TRANSIENT);
+        };
+
+        if (have_tags) {
+            bind_ns_id(tags_stmt);
             while (sqlite3_step(tags_stmt) == SQLITE_ROW) {
                 if (auto *t = (const char *)sqlite3_column_text(tags_stmt, 0))
                     e.tags.push_back(t);
+            }
+        }
+
+        if (have_auth) {
+            bind_ns_id(authors_stmt);
+            while (sqlite3_step(authors_stmt) == SQLITE_ROW) {
+                Author a;
+                if (auto *t = (const char *)sqlite3_column_text(authors_stmt, 0))
+                    a.name = t;
+                if (auto *t = (const char *)sqlite3_column_text(authors_stmt, 1))
+                    a.email = t;
+                if (auto *t = (const char *)sqlite3_column_text(authors_stmt, 2))
+                    a.uri = t;
+                e.authors.push_back(std::move(a));
+            }
+        }
+
+        if (have_encs) {
+            bind_ns_id(encs_stmt);
+            while (sqlite3_step(encs_stmt) == SQLITE_ROW) {
+                Enclosure enc;
+                if (auto *t = (const char *)sqlite3_column_text(encs_stmt, 0))
+                    enc.url = t;
+                if (auto *t = (const char *)sqlite3_column_text(encs_stmt, 1))
+                    enc.type = t;
+                enc.length = sqlite3_column_int64(encs_stmt, 2);
+                e.enclosures.push_back(std::move(enc));
             }
         }
 
@@ -417,7 +545,9 @@ void db_query_entries(Elfeed *app, const Filter &filter,
             out.push_back(std::move(e));
     }
 
-    if (have_tags_stmt) sqlite3_finalize(tags_stmt);
+    if (have_tags) sqlite3_finalize(tags_stmt);
+    if (have_auth) sqlite3_finalize(authors_stmt);
+    if (have_encs) sqlite3_finalize(encs_stmt);
     sqlite3_finalize(stmt);
 }
 

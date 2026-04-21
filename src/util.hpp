@@ -40,8 +40,37 @@ std::string user_home_dir();
 
 // Format `epoch` (Unix seconds, UTC) as local-time strings. Returns an
 // empty string for non-positive input.
-std::string format_date(double epoch);      // "YYYY-MM-DD"
-std::string format_datetime(double epoch);  // "YYYY-MM-DD HH:MM:SS"
+std::string format_date(double epoch);          // "YYYY-MM-DD"
+std::string format_datetime(double epoch);      // "YYYY-MM-DD HH:MM:SS"
+std::string format_date_compact(double epoch);  // "YYYYMMDD"
+
+// ---- Filename building ----
+
+// Sanitize one path segment:
+//   - 0x41-0x5A  (A-Z): lowercased
+//   - 0x30-0x39, 0x61-0x7A  (0-9, a-z): kept as-is
+//   - >= 0x80: passed through verbatim (UTF-8 bytes keep their shape)
+//   - other 0-127: a run of such bytes becomes a single '_'
+// Leading and trailing '_' are trimmed.
+std::string sanitize_filename(const std::string &s);
+
+// Map an HTTP Content-Type to a file extension (no leading dot). On
+// miss, tries to pluck one from `url_fallback` (trailing .xxx, up to
+// 5 ASCII alnum chars, before any '?' or '#'). On still-miss, "bin".
+// Caller-provided type is lowercased before lookup; MIME parameters
+// (";charset=...") are stripped.
+std::string mime_to_extension(const std::string &mime_type,
+                              const std::string &url_fallback = {});
+
+// Given directory, base filename (no extension), and extension (no
+// dot), return a full path that does not collide with an existing
+// file. On collision, appends " (N)" before the dot, starting at 1,
+// up to 999. The returned path may not yet exist; the caller opens
+// it. Races between concurrent downloads are not handled — but our
+// single-in-flight model means this isn't an issue in practice.
+std::string disambiguate_path(const std::string &dir,
+                              const std::string &base,
+                              const std::string &ext);
 
 // ---- Feed date parsing ----
 

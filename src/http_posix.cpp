@@ -115,3 +115,71 @@ HttpResponse http_fetch(const HttpRequest &req)
     // fall back to the request URL.
     return out;
 }
+
+// --- Streaming download -----------------------------------------------
+
+HttpDownloadResult http_download(const HttpDownloadRequest &req)
+{
+    HttpDownloadResult out;
+
+    std::string origin, path;
+    if (!split_url(req.url, origin, path)) {
+        out.error = "invalid URL";
+        return out;
+    }
+
+    httplib::Client cli(origin);
+    if (req.timeout_seconds > 0) {
+        cli.set_connection_timeout(req.timeout_seconds, 0);
+        cli.set_read_timeout(req.timeout_seconds, 0);
+        cli.set_write_timeout(req.timeout_seconds, 0);
+    } else {
+        // Long-lived download. Only cap the initial connect.
+        cli.set_connection_timeout(30, 0);
+    }
+    cli.set_follow_location(true);
+    cli.set_compress(false);
+    cli.set_decompress(false);
+    cli.set_keep_alive(false);
+
+    if (!g_ca_path.empty())
+        cli.set_ca_cert_path(g_ca_path.c_str());
+    cli.enable_server_certificate_verification(true);
+
+    httplib::Headers headers;
+    if (!req.user_agent.empty())
+        headers.emplace("User-Agent", req.user_agent);
+
+    uint64_t total = 0;
+
+    auto on_response = [&](const httplib::Response &resp) -> bool {
+        auto it = resp.headers.find("Content-Length");
+        if (it != resp.headers.end()) {
+            try { total = std::stoull(it->second); }
+            catch (...) { total = 0; }
+        }
+        return true;
+    };
+
+    auto on_chunk = [&](const char *data, size_t n) -> bool {
+        if (req.write && !req.write(data, n)) {
+            out.cancelled = true;
+            return false;
+        }
+        out.bytes += n;
+        if (req.progress && !req.progress(out.bytes, total)) {
+            out.cancelled = true;
+            return false;
+        }
+        return true;
+    };
+
+    auto res = cli.Get(path, headers, on_response, on_chunk);
+    if (!res) {
+        if (!out.cancelled)
+            out.error = httplib::to_string(res.error());
+        return out;
+    }
+    out.status = res->status;
+    return out;
+}

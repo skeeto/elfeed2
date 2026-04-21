@@ -80,18 +80,36 @@ void EntryDetail::show_entry(const Entry *e)
         link_->Hide();
     }
 
-    // wxHtmlWindow expects HTML; if content_type was plain, escape it.
-    if (!e->content.empty()) {
-        if (e->content_type == "text" || e->content_type.empty()) {
-            // Best-effort: render as HTML. Atom/RSS usually have HTML
-            // content anyway.
-            body_->SetPage(wxString::FromUTF8(e->content));
-        } else {
-            body_->SetPage(wxString::FromUTF8(e->content));
+    // Enclosures rendered above the body. wxHtmlWindow handles
+    // <a href> clicks by opening the default browser.
+    std::string body;
+    if (!e->enclosures.empty()) {
+        body += "<p>";
+        for (size_t i = 0; i < e->enclosures.size(); i++) {
+            const Enclosure &enc = e->enclosures[i];
+            if (i > 0) body += "<br>";
+            body += "<b>Enclosure:</b> ";
+            body += "<a href=\"" + enc.url + "\">" + enc.url + "</a>";
+            if (!enc.type.empty() || enc.length > 0) {
+                body += " <i>(";
+                if (!enc.type.empty()) body += enc.type;
+                if (enc.length > 0) {
+                    if (!enc.type.empty()) body += ", ";
+                    body += std::to_string(enc.length) + " bytes";
+                }
+                body += ")</i>";
+            }
         }
-    } else {
-        body_->SetPage("<p><i>(no content)</i></p>");
+        body += "</p><hr>";
     }
+
+    // wxHtmlWindow expects HTML; Atom/RSS bodies are HTML by convention.
+    if (!e->content.empty()) {
+        body += e->content;
+    } else if (e->enclosures.empty()) {
+        body += "<p><i>(no content)</i></p>";
+    }
+    body_->SetPage(wxString::FromUTF8(body));
 
     Layout();
 }

@@ -1,6 +1,8 @@
 #ifndef ELFEED_HTTP_HPP
 #define ELFEED_HTTP_HPP
 
+#include <cstdint>
+#include <functional>
 #include <string>
 
 struct HttpRequest {
@@ -28,5 +30,26 @@ HttpResponse http_fetch(const HttpRequest &req);
 // Returns empty string on success, or an error message on failure.
 // Safe to call multiple times (only the first call does work).
 std::string http_init();
+
+// Streaming HTTP GET. Bytes are delivered via `write`; callers stream
+// them to disk. Both `write` and `progress` return false to cancel.
+// For use from a worker thread — the call blocks for the full transfer.
+struct HttpDownloadRequest {
+    std::string url;
+    std::string user_agent;
+    int timeout_seconds = 0;   // 0 = no timeout (good for large files)
+    int max_redirects = 5;
+    std::function<bool(const char *data, size_t n)> write;
+    std::function<bool(uint64_t current, uint64_t total)> progress;
+};
+
+struct HttpDownloadResult {
+    int status = 0;
+    uint64_t bytes = 0;
+    bool cancelled = false;
+    std::string error;
+};
+
+HttpDownloadResult http_download(const HttpDownloadRequest &req);
 
 #endif
