@@ -29,23 +29,31 @@ std::string user_data_dir()
 
 std::string user_config_dir()
 {
-#ifdef __WXMSW__
-    // No established convention for hand-edited config on Windows;
-    // keep it alongside the data directory.
-    return std_paths().GetUserDataDir().utf8_string();
-#else
-    // macOS and Linux: follow XDG so the file is reachable from a
-    // terminal at a familiar path (~/.config/<app>/config), not buried
-    // under ~/Library/Application Support. Matches neovim / git-with-
-    // XDG / rclone / etc. on macOS; matches XDG directly on Linux.
+    // Every platform: hand-edited config lives at ~/.config/<app>/config
+    // (or wherever XDG_CONFIG_HOME points). This puts the file somewhere
+    // reachable from a terminal rather than buried under AppData or
+    // ~/Library/Application Support. The cascade:
+    //   1. $XDG_CONFIG_HOME/<app>   (explicit opt-in, wins on all OSes)
+    //   2. $HOME/.config/<app>
+    //   3. $USERPROFILE/.config/<app>   (Windows-only fallback)
+    // wxGetEnv is wide internally on Windows, so this is Unicode-safe.
     wxString base;
-    if (!wxGetEnv("XDG_CONFIG_HOME", &base) || base.empty())
-        base = wxGetHomeDir() + "/.config";
+    if (!wxGetEnv("XDG_CONFIG_HOME", &base) || base.empty()) {
+        wxString home;
+        if (!wxGetEnv("HOME", &home) || home.empty()) {
+#ifdef __WXMSW__
+            if (!wxGetEnv("USERPROFILE", &home) || home.empty())
+                home = wxGetHomeDir();
+#else
+            home = wxGetHomeDir();
+#endif
+        }
+        base = home + "/.config";
+    }
     wxString app = (wxTheApp && !wxTheApp->GetAppName().empty())
         ? wxTheApp->GetAppName()
         : wxString("elfeed2");
     return (base + "/" + app).utf8_string();
-#endif
 }
 
 std::string user_home_dir()
