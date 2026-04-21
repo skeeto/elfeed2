@@ -53,6 +53,7 @@ private:
     void on_toggle_preview(wxCommandEvent &);
     void on_toggle_log(wxCommandEvent &);
     void on_toggle_downloads(wxCommandEvent &);
+    void on_reset_layout(wxCommandEvent &);
     void on_about(wxCommandEvent &);
     void on_quit(wxCommandEvent &);
     void on_close(wxCloseEvent &);
@@ -82,6 +83,11 @@ private:
     int menu_preview_id_ = 0;
     int menu_log_id_ = 0;
     int menu_downloads_id_ = 0;
+
+    // Snapshot of the AUI perspective right after build_widgets has
+    // applied the construction-time defaults but before any saved
+    // perspective is loaded. Reset-layout restores this exact state.
+    wxString default_perspective_;
 };
 
 #endif

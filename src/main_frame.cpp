@@ -29,6 +29,7 @@ enum {
     ID_TogglePreview,
     ID_ToggleLog,
     ID_ToggleDownloads,
+    ID_ResetLayout,
 };
 
 MainFrame::MainFrame(Elfeed *app)
@@ -86,6 +87,8 @@ void MainFrame::build_menus()
         m_view->AppendCheckItem(ID_ToggleLog,       "&Log")->GetId();
     menu_downloads_id_ =
         m_view->AppendCheckItem(ID_ToggleDownloads, "&Downloads")->GetId();
+    m_view->AppendSeparator();
+    m_view->Append(ID_ResetLayout, "&Reset Layout");
     mbar->Append(m_view, "&View");
 
     auto *m_help = new wxMenu;
@@ -188,13 +191,18 @@ void MainFrame::build_widgets()
                      .MinSize(FromDIP(wxSize(-1, 200)))
                      .Hide());
 
-    // Restore saved layout if present; otherwise the AddPane MinSize
-    // hints above govern the initial dock dimensions.
-    std::string saved = db_load_ui_state(app_, "layout");
-    if (!saved.empty())
-        mgr_.LoadPerspective(wxString::FromUTF8(saved), false);
-
+    // Run an initial Update with just the construction-time defaults so
+    // wxAUI computes the dock_size entries we want. Snapshot the
+    // resulting perspective for "Reset Layout" before any saved
+    // perspective is applied on top.
     mgr_.Update();
+    default_perspective_ = mgr_.SavePerspective();
+
+    std::string saved = db_load_ui_state(app_, "layout");
+    if (!saved.empty()) {
+        mgr_.LoadPerspective(wxString::FromUTF8(saved), false);
+        mgr_.Update();
+    }
 }
 
 void MainFrame::bind_events()
@@ -206,6 +214,7 @@ void MainFrame::bind_events()
     Bind(wxEVT_MENU, &MainFrame::on_toggle_preview,   this, ID_TogglePreview);
     Bind(wxEVT_MENU, &MainFrame::on_toggle_log,       this, ID_ToggleLog);
     Bind(wxEVT_MENU, &MainFrame::on_toggle_downloads, this, ID_ToggleDownloads);
+    Bind(wxEVT_MENU, &MainFrame::on_reset_layout,     this, ID_ResetLayout);
     Bind(wxEVT_MENU, &MainFrame::on_about, this, wxID_ABOUT);
     Bind(wxEVT_MENU, &MainFrame::on_quit,  this, wxID_EXIT);
     Bind(wxEVT_CLOSE_WINDOW, &MainFrame::on_close, this);
@@ -423,6 +432,19 @@ void MainFrame::on_toggle_feeds(wxCommandEvent &)     { toggle_pane("feeds"); }
 void MainFrame::on_toggle_preview(wxCommandEvent &)   { toggle_pane("entry_detail"); }
 void MainFrame::on_toggle_log(wxCommandEvent &)       { toggle_pane("log"); }
 void MainFrame::on_toggle_downloads(wxCommandEvent &) { toggle_pane("downloads"); }
+
+void MainFrame::on_reset_layout(wxCommandEvent &)
+{
+    // Restore the perspective captured at construction. Persist it
+    // immediately so a later crash before on_close can't bring back
+    // the old customised layout.
+    if (default_perspective_.empty()) return;
+    mgr_.LoadPerspective(default_perspective_, false);
+    mgr_.Update();
+    db_save_ui_state(app_, "layout",
+                     default_perspective_.utf8_string().c_str());
+    update_menu_checks();
+}
 
 void MainFrame::on_about(wxCommandEvent &)
 {
