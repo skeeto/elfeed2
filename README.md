@@ -1,27 +1,32 @@
-# Elfeed2
+# Elfeed2 : the Elfeed feed reader experience without Emacs
 
-A standalone feed reader, successor to [Elfeed][elfeed]. Built with C++20,
-Dear ImGui, SDL3, SQLite, and libcurl.
+Standalone feed reader, successor to [Elfeed][elfeed]. The goal: replicate
+the Elfeed experience without Emacs. Built with C++20, wxWidgets, SQLite3,
+pugixml, cpp-httplib, and mbedTLS.
 
-[elfeed]: https://github.com/skeeto/elfeed
+**This is an early work in progress.** Expect breakage. Config format and
+database schema are not locked down. You may need to delete your database
+between updates. Use the import feature (File menu) to load your classic
+Elfeed database (one-way conversion) so you have something meaningful to
+test.
+
+[Input and ideas are welcome][discussion] as the UI takes shape. The scope
+is somewhat broader, and Elfeed2 has a built-in video (via user-supplied
+[yt-dlp][]) and podcast download manager.
 
 ## Building
 
-Requires CMake 3.25+, a C++20 compiler, and libcurl. All other
-dependencies (Dear ImGui, SDL3, SQLite, pugixml) are fetched
-automatically.
+Requires CMake 3.25+ and a C++20 compiler. All other dependencies are
+fetched automatically.
 
-    cmake -B build
-    cmake --build build
-
-Dependencies in `deps/` are used when present (bundled), otherwise
-downloaded. Set `-DDEPS=LOCAL` to use only system-installed packages, or
-`-DDEPS=DOWNLOAD` to always fetch.
+    $ cmake -B build
+    $ cmake --build build
 
 ## Configuration
 
-The config file is `$XDG_CONFIG_HOME/elfeed2/config` (typically
-`~/.config/elfeed2/config`). It is a simple line-oriented format.
+The configuration file is at `$XDG_CONFIG_HOME/elfeed2/config` (typically
+`~/.config/elfeed2/config`) on all platforms. It is a simple line-oriented
+format.
 
 ### Feeds
 
@@ -125,6 +130,14 @@ Visual selection (`v`) extends `u`, `r`, `b`, `y` to operate on a range.
 
 ## Data
 
-The database is stored at `$XDG_DATA_HOME/elfeed2/elfeed.db` (typically
-`~/.local/share/elfeed2/elfeed.db`). Window geometry and UI state are
-persisted there as well.
+Window geometry and UI state are persisted in the database as well as feed
+and entry data. The database is stored at:
+
+* Windows: `%APPDATA%\elfeed2`
+* macOS: `~/Library/Application Support/elfeed2`
+* Linux: `$XDG_DATA_HOME/elfeed2`
+
+
+[discussion]: https://github.com/skeeto/elfeed2/discussions
+[elfeed]: https://github.com/skeeto/elfeed
+[yt-dlp]: https://github.com/yt-dlp/yt-dlp
