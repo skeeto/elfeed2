@@ -77,6 +77,23 @@ CREATE TABLE IF NOT EXISTS ui_state (
     key   TEXT PRIMARY KEY,
     value TEXT
 );
+
+-- Inline-image cache for the preview pane. Images referenced by
+-- <img src="http(s)://..."> inside entry content are fetched once
+-- and stored here, then served to wxHtmlWindow as data: URIs.
+-- last_used is bumped on every cache hit; LRU eviction keeps total
+-- blob bytes under image_cache's configured cap.
+CREATE TABLE IF NOT EXISTS image_cache (
+    url       TEXT PRIMARY KEY,
+    mime_type TEXT NOT NULL,
+    bytes     BLOB NOT NULL,
+    size      INTEGER NOT NULL,   -- duplicate of length(bytes) so
+                                  -- SUM() doesn't scan the blobs
+    last_used REAL NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_image_cache_lru
+    ON image_cache(last_used);
 )";
 
 // --- Database operations ---

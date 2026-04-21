@@ -17,11 +17,20 @@ class EntryDetail : public wxPanel {
 public:
     EntryDetail(wxWindow *parent, Elfeed *app);
 
-    // Show the given entry. Pass nullptr to clear.
+    // Show the given entry. Pass nullptr to clear. The pointer is
+    // cached so relayout() can re-render after images land from the
+    // background cache. Callers must keep the pointed-to Entry alive
+    // (typically app->entries[row]) until show_entry is called again.
     void show_entry(const Entry *entry);
+
+    // Re-render the currently-shown entry. Called after new image
+    // bytes arrive in the cache so wxHtmlWindow picks them up. Scroll
+    // position is preserved so the user's reading spot doesn't jump.
+    void relayout();
 
 private:
     void on_link_click(wxMouseEvent &);
+    void render();  // rebuild HTML from current_ and push to body_
 
     Elfeed *app_;
     wxStaticText *title_ = nullptr;
@@ -29,6 +38,7 @@ private:
     wxStaticText *link_ = nullptr;
     std::string   link_url_;   // click target for link_
     wxHtmlWindow *body_ = nullptr;
+    const Entry  *current_ = nullptr;
 };
 
 #endif

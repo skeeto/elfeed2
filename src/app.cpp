@@ -1,8 +1,11 @@
 #include "app.hpp"
+#include "data_uri_handler.hpp"
 #include "events.hpp"
 #include "main_frame.hpp"
 
 #include <wx/event.h>
+#include <wx/filesys.h>
+#include <wx/image.h>
 #include <wx/msgdlg.h>
 #include <wx/utils.h>
 
@@ -122,6 +125,21 @@ bool ElfeedApp::OnInit()
     wxConvCurrent = &wxConvUTF8;
 
     SetAppName("elfeed2");
+
+    // Install decoders for every image format wxWidgets can handle
+    // (PNG, JPEG, GIF, WebP, TIFF, BMP, PCX, etc). Without this call
+    // wxImage only knows BMP, so wxHtmlWindow pops up "Unknown image
+    // data format" dialogs for any real-world <img> it tries to
+    // render. Must run before any image decode happens, so place it
+    // here near the top of OnInit.
+    wxInitAllImageHandlers();
+
+    // Register the data: URI handler with wxFileSystem so wxHtmlWindow
+    // renders inline images written as data URIs. wxFileSystem owns
+    // the handler after AddHandler; we just hand it off. wx 3.2 has
+    // no built-in data: handler, so without this step <img src="data
+    // :..."> silently drops.
+    wxFileSystem::AddHandler(new DataURIHandler);
 
     // Single-instance guard. Two copies running against the same
     // SQLite database would race on writes and the AUI/geometry state

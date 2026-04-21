@@ -167,6 +167,8 @@ set(elfeed_sources
   src/config.cpp
   src/fetch.cpp
   src/download.cpp
+  src/image_cache.cpp
+  src/data_uri_handler.cpp
   src/util.cpp
   src/elfeed_import.cpp
 )

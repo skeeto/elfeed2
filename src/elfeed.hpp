@@ -7,6 +7,7 @@
 #include <string>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 struct sqlite3;
@@ -163,6 +164,22 @@ struct Elfeed {
     int download_next_id = 1;
     int download_active_id = 0;
     wxProcess *download_process = nullptr;
+
+    // Inline image cache (preview pane). Worker threads fetch images
+    // referenced by entry content and push results onto image_inbox;
+    // the UI thread drains the inbox on wake, writes rows to
+    // image_cache in the DB, then re-renders the active entry so the
+    // newly-cached images appear as data: URIs.
+    struct ImageInboxItem {
+        std::string url;
+        std::string mime;   // empty on fetch failure
+        std::string bytes;
+    };
+    std::mutex image_mutex;
+    std::vector<ImageInboxItem> image_inbox;
+    // URLs with an in-flight worker; dedupes concurrent fetch requests
+    // so opening two entries that share an image doesn't double-fetch.
+    std::unordered_set<std::string> image_in_flight;
 
     // Log
     std::mutex log_mutex;

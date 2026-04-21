@@ -3,6 +3,7 @@
 #include "downloads_panel.hpp"
 #include "elfeed_import.hpp"
 #include "entry_detail.hpp"
+#include "image_cache.hpp"
 #include "util.hpp"
 #include "entry_list.hpp"
 #include "events.hpp"
@@ -414,6 +415,12 @@ void MainFrame::on_wake(wxThreadEvent &)
         requery();
         if (feeds_) feeds_->refresh();  // titles may have been filled in
     }
+    // Drain the inline-image inbox: worker threads push downloaded
+    // bytes, we write them to the cache table, and if anything
+    // landed, re-render the preview pane so the new data: URIs
+    // replace the broken <img> boxes.
+    if (image_cache_process_results(app_) && detail_)
+        detail_->relayout();
     update_status();
     download_tick(app_);
     if (pane_shown("log")       && log_)       log_->refresh();

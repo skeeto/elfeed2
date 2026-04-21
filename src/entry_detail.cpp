@@ -1,4 +1,5 @@
 #include "entry_detail.hpp"
+#include "image_cache.hpp"
 #include "util.hpp"
 
 #include <wx/cursor.h>
@@ -76,6 +77,8 @@ void EntryDetail::on_link_click(wxMouseEvent &)
 
 void EntryDetail::show_entry(const Entry *e)
 {
+    current_ = e;
+
     if (!e) {
         title_->SetLabel("(no entry selected)");
         subtitle_->SetLabel("");
@@ -118,6 +121,28 @@ void EntryDetail::show_entry(const Entry *e)
         link_->Hide();
     }
 
+    render();
+    Layout();
+}
+
+void EntryDetail::relayout()
+{
+    // Called when the image cache drained new bytes — the HTML body
+    // needs to be re-rendered so wxHtmlWindow picks up the freshly
+    // cached images as data URIs. Preserve the user's scroll position
+    // so their reading spot doesn't jump.
+    if (!current_) return;
+    int vx = 0, vy = 0;
+    body_->GetViewStart(&vx, &vy);
+    render();
+    body_->Scroll(vx, vy);
+}
+
+void EntryDetail::render()
+{
+    if (!current_) return;
+    const Entry *e = current_;
+
     // Enclosures rendered above the body. wxHtmlWindow handles
     // <a href> clicks by opening the default browser.
     std::string body;
@@ -147,7 +172,12 @@ void EntryDetail::show_entry(const Entry *e)
     } else if (e->enclosures.empty()) {
         body += "<p><i>(no content)</i></p>";
     }
-    body_->SetPage(wxString::FromUTF8(body));
 
-    Layout();
+    // Swap external http(s) image URLs for cached data: URIs in the
+    // same pass that queues fetches for the ones we don't have yet.
+    // Cheap for a document with no images; only the fetched-and-not-
+    // yet-cached images trigger background work.
+    body = image_cache_inline(app_, body);
+
+    body_->SetPage(wxString::FromUTF8(body));
 }
