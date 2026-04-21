@@ -53,6 +53,7 @@ private:
     void on_frame_move_size(wxEvent &);
     void on_filter_text(wxCommandEvent &);
     void on_fetch_all(wxCommandEvent &);
+    void on_reload_config(wxCommandEvent &);
     void on_import_classic(wxCommandEvent &);
     void do_import_classic();  // deferred via CallAfter
     void on_toggle_feeds(wxCommandEvent &);

@@ -66,6 +66,42 @@ void elfeed_init(Elfeed *app)
     app->current_filter = filter_parse(app->default_filter);
 }
 
+void config_reload(Elfeed *app)
+{
+    // Reset every field config_load writes to. The literal defaults
+    // here must match the member initializers in struct Elfeed — they
+    // represent "no config at all". Without this reset, values like
+    // ytdlp_args (which accumulates) would grow on every reload.
+    app->feeds.clear();
+    app->presets.clear();
+    app->download_dir.clear();
+    app->ytdlp_program = "yt-dlp";
+    app->ytdlp_args.clear();
+    app->default_filter = "@6-months-ago +unread";
+    app->max_connections = 16;
+    app->fetch_timeout = 30;
+
+    config_load(app);
+
+    // Re-decorate the fresh subscription list with DB-side metadata
+    // (etag, title, last_update, etc.) so the next fetch still sends
+    // conditional headers and the feeds pane shows the right titles.
+    db_load_feeds(app);
+
+    // Same user-title sync rule as elfeed_init: a config stanza with
+    // `title X` writes title_user=X; a stanza with no title clears
+    // any prior override. Feeds that disappeared from config are
+    // left alone so historical entries still show a friendly name.
+    for (auto &f : app->feeds)
+        db_set_user_title(app, f.url, f.user_title);
+
+    db_load_feed_titles(app);
+
+    // Note: current_filter is deliberately NOT reset. The user's
+    // active filter bar text is more recent than the config's
+    // default_filter and shouldn't be clobbered by a reload.
+}
+
 void elfeed_shutdown(Elfeed *app)
 {
     fetch_stop(app);

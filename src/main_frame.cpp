@@ -27,6 +27,7 @@
 enum {
     ID_Fetch = wxID_HIGHEST + 1,
     ID_ImportClassic,
+    ID_ReloadConfig,
     ID_ToggleFeeds,
     ID_TogglePreview,
     ID_ToggleLog,
@@ -106,6 +107,7 @@ void MainFrame::build_menus()
 
     auto *m_elfeed = new wxMenu;
     m_elfeed->Append(ID_Fetch, "&Fetch All\tF5");
+    m_elfeed->Append(ID_ReloadConfig, "&Reload Config\tCtrl+Shift+R");
     m_elfeed->AppendSeparator();
     m_elfeed->Append(ID_ImportClassic, wxT("&Import Classic Elfeed Index…"));
     m_elfeed->AppendSeparator();
@@ -248,6 +250,7 @@ void MainFrame::bind_events()
 {
     Bind(wxEVT_ELFEED_WAKE, &MainFrame::on_wake, this);
     Bind(wxEVT_MENU, &MainFrame::on_fetch_all,        this, ID_Fetch);
+    Bind(wxEVT_MENU, &MainFrame::on_reload_config,    this, ID_ReloadConfig);
     Bind(wxEVT_MENU, &MainFrame::on_import_classic,   this, ID_ImportClassic);
     Bind(wxEVT_MENU, &MainFrame::on_toggle_feeds,     this, ID_ToggleFeeds);
     Bind(wxEVT_MENU, &MainFrame::on_toggle_preview,   this, ID_TogglePreview);
@@ -428,6 +431,26 @@ void MainFrame::on_filter_text(wxCommandEvent &)
 void MainFrame::on_fetch_all(wxCommandEvent &)
 {
     fetch_all(app_);
+    update_status();
+}
+
+void MainFrame::on_reload_config(wxCommandEvent &)
+{
+    // Re-parse the config file and rebuild subscription-derived state
+    // in place — same effect as quit+relaunch, minus the UI state
+    // (window geometry, AUI layout, current filter) which stays put.
+    // Feed metadata (etag, last_modified, last_update) survives
+    // because config_reload re-hydrates it from the DB.
+    elfeed_log(app_, LOG_INFO, "reloading config from %s",
+               app_->config_path.c_str());
+    config_reload(app_);
+
+    // The subscription list, feed titles, and autotags may all have
+    // changed. Refresh the feeds panel, re-run the query so the entry
+    // list picks up new `feed_title` values (used by = / ~ filters),
+    // and update the status bar entry count.
+    if (feeds_) feeds_->refresh();
+    requery();
     update_status();
 }
 

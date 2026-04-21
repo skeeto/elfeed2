@@ -210,6 +210,12 @@ std::string db_load_ui_state(Elfeed *app, const char *key);
 // Config
 void config_load(Elfeed *app);
 
+// Clear config-derived state (feeds subscription list, presets,
+// ytdlp args, globals) and re-run config_load. Re-hydrates feed
+// metadata from the DB and refreshes feed_titles. The caller is
+// responsible for telling the UI to re-render.
+void config_reload(Elfeed *app);
+
 // Feed parsing
 struct FeedParseResult {
     std::string feed_title;
