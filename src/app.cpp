@@ -3,6 +3,8 @@
 #include "main_frame.hpp"
 
 #include <wx/event.h>
+#include <wx/msgdlg.h>
+#include <wx/utils.h>
 
 #include <cstdarg>
 #include <cstdio>
@@ -84,6 +86,24 @@ bool ElfeedApp::OnInit()
     wxConvCurrent = &wxConvUTF8;
 
     SetAppName("elfeed2");
+
+    // Single-instance guard. Two copies running against the same
+    // SQLite database would race on writes and the AUI/geometry state
+    // would clobber each other at close time. Per-user scope via
+    // wxGetUserId so different users on the same machine aren't
+    // locked out. On Windows this is a named mutex; on POSIX it's a
+    // lock file under the user's runtime/temp dir. On macOS the
+    // bundle already single-instances when launched from Dock/Finder,
+    // but running the binary directly from a terminal bypasses that
+    // — this covers it.
+    instance_checker_ = std::make_unique<wxSingleInstanceChecker>(
+        "elfeed2-" + wxGetUserId());
+    if (instance_checker_->IsAnotherRunning()) {
+        wxMessageBox("Another elfeed2 instance is already running.",
+                     "elfeed2", wxOK | wxICON_INFORMATION);
+        instance_checker_.reset();
+        return false;
+    }
 
     elfeed_init(&state_);
 

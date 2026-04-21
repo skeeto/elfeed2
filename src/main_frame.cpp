@@ -12,6 +12,7 @@
 #include <wx/aui/framemanager.h>
 #include <wx/busyinfo.h>
 #include <wx/clipbrd.h>
+#include <wx/display.h>
 #include <wx/filedlg.h>
 #include <wx/menu.h>
 #include <wx/msgdlg.h>
@@ -21,6 +22,7 @@
 #include <wx/utils.h>
 
 #include <algorithm>
+#include <cstdio>
 
 enum {
     ID_Fetch = wxID_HIGHEST + 1,
@@ -39,8 +41,40 @@ MainFrame::MainFrame(Elfeed *app)
 {
     app_->event_sink = this;
 
-    SetClientSize(FromDIP(wxSize(1500, 900)));
-    Centre();
+    // Restore window geometry from the previous run. Format in the DB:
+    // "x y w h maximized" (five ints, space-separated). If anything
+    // looks off — unparseable, too small, or no longer intersects any
+    // connected display — fall back to the 1500x900 centered default.
+    bool restored = false;
+    std::string geom = db_load_ui_state(app_, "geometry");
+    if (!geom.empty()) {
+        int x = 0, y = 0, w = 0, h = 0, maxi = 0;
+        if (sscanf(geom.c_str(), "%d %d %d %d %d",
+                   &x, &y, &w, &h, &maxi) == 5 &&
+            w >= 400 && h >= 300) {
+            // Only apply the saved rect if some part of it still
+            // lands on a connected display; otherwise we'd spawn the
+            // window on a monitor the user no longer has.
+            bool on_screen = false;
+            wxRect saved(x, y, w, h);
+            for (unsigned i = 0; i < wxDisplay::GetCount(); i++) {
+                if (wxDisplay(i).GetGeometry().Intersects(saved)) {
+                    on_screen = true;
+                    break;
+                }
+            }
+            if (on_screen) {
+                SetSize(saved);
+                if (maxi) Maximize(true);
+                restored = true;
+            }
+        }
+    }
+    if (!restored) {
+        SetClientSize(FromDIP(wxSize(1500, 900)));
+        Centre();
+    }
+    normal_rect_ = wxRect(GetPosition(), GetSize());
 
     build_menus();
     build_widgets();
@@ -224,6 +258,8 @@ void MainFrame::bind_events()
     Bind(wxEVT_MENU, &MainFrame::on_quit,  this, wxID_EXIT);
     Bind(wxEVT_CLOSE_WINDOW, &MainFrame::on_close, this);
     Bind(wxEVT_AUI_PANE_CLOSE, &MainFrame::on_pane_close, this);
+    Bind(wxEVT_MOVE, &MainFrame::on_frame_move_size, this);
+    Bind(wxEVT_SIZE, &MainFrame::on_frame_move_size, this);
 
     filter_->Bind(wxEVT_TEXT, &MainFrame::on_filter_text, this);
     filter_->Bind(wxEVT_SEARCH_CANCEL, [this](wxCommandEvent &) {
@@ -484,6 +520,16 @@ void MainFrame::on_quit(wxCommandEvent &)
     Close(false);
 }
 
+void MainFrame::on_frame_move_size(wxEvent &e)
+{
+    // Track the last non-maximized / non-iconized rect so we can
+    // persist it at close time. Also allow wx to process the event
+    // normally (Skip()) — this is just a sniffer.
+    if (!IsMaximized() && !IsIconized())
+        normal_rect_ = wxRect(GetPosition(), GetSize());
+    e.Skip();
+}
+
 void MainFrame::on_close(wxCloseEvent &)
 {
     // Persist per-panel column widths/visibility before the panels die.
@@ -499,9 +545,21 @@ void MainFrame::on_close(wxCloseEvent &)
                          filter_->GetValue().utf8_string().c_str());
     }
 
-    // Save the AUI perspective last (covers pane positions).
+    // Save the AUI perspective (covers pane positions).
     wxString persp = mgr_.SavePerspective();
     db_save_ui_state(app_, "layout", persp.utf8_string().c_str());
+
+    // Save the outer-frame geometry. When maximized we still record
+    // the last non-maximized rect (tracked by on_frame_move_size) so
+    // un-maximize next run gives the user the same window they had.
+    bool maxi = IsMaximized();
+    char buf[64];
+    snprintf(buf, sizeof(buf), "%d %d %d %d %d",
+             normal_rect_.x, normal_rect_.y,
+             normal_rect_.width, normal_rect_.height,
+             maxi ? 1 : 0);
+    db_save_ui_state(app_, "geometry", buf);
+
     mgr_.UnInit();
     Destroy();
 }

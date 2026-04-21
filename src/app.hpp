@@ -2,6 +2,10 @@
 #define ELFEED_APP_HPP
 
 #include <wx/app.h>
+#include <wx/snglinst.h>
+
+#include <memory>
+
 #include "elfeed.hpp"
 
 class MainFrame;
@@ -17,6 +21,7 @@ public:
 private:
     Elfeed state_;
     MainFrame *main_frame_ = nullptr;
+    std::unique_ptr<wxSingleInstanceChecker> instance_checker_;
 };
 
 wxDECLARE_APP(ElfeedApp);

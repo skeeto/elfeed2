@@ -50,6 +50,7 @@ private:
 
     // ---- Events ----
     void on_wake(wxThreadEvent &);
+    void on_frame_move_size(wxEvent &);
     void on_filter_text(wxCommandEvent &);
     void on_fetch_all(wxCommandEvent &);
     void on_import_classic(wxCommandEvent &);
@@ -93,6 +94,11 @@ private:
     // applied the construction-time defaults but before any saved
     // perspective is loaded. Reset-layout restores this exact state.
     wxString default_perspective_;
+
+    // Last known non-maximized / non-iconized window rect. Updated on
+    // every move/resize; saved at close time so "quit while maximized,
+    // relaunch, un-maximize" restores the previous floating window.
+    wxRect normal_rect_;
 };
 
 #endif
