@@ -13,6 +13,7 @@
 #include "elfeed.hpp"
 
 #include "http.hpp"
+#include "util.hpp"
 
 #include <wx/ffile.h>
 #include <wx/process.h>
@@ -212,9 +213,7 @@ static void http_worker(Elfeed *app, HttpJob *job, std::string url)
 
     HttpDownloadRequest req;
     req.url = std::move(url);
-    char ua[64];
-    snprintf(ua, sizeof(ua), "Elfeed2/%s", ELFEED_VERSION);
-    req.user_agent = ua;
+    req.user_agent = elfeed_user_agent();
 
     req.write = [&out, job](const char *data, size_t n) -> bool {
         if (job->cancelled.load()) return false;

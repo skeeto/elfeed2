@@ -11,6 +11,15 @@
 
 class wxDataViewCtrl;
 
+// ---- User agent ----
+
+// The HTTP User-Agent we send for both feed fetches and direct
+// downloads. Follows the "+URL" convention used by well-behaved
+// readers/bots: identifies as a feed reader and points at the
+// project page so webmasters investigating their logs can figure
+// out what's hitting them.
+std::string elfeed_user_agent();
+
 // ---- Filesystem ----
 
 // Create `path` and any missing parent directories. UTF-8 input; safe

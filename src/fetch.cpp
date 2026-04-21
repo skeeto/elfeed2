@@ -4,6 +4,7 @@
 
 #include "elfeed.hpp"
 #include "http.hpp"
+#include "util.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -115,9 +116,7 @@ void fetch_all(Elfeed *app)
     if (nworkers < 1) nworkers = 1;
     auto live = std::make_shared<std::atomic<int>>(nworkers);
 
-    char ua[64];
-    snprintf(ua, sizeof(ua), "Elfeed2/%s", ELFEED_VERSION);
-    std::string user_agent(ua);
+    std::string user_agent = elfeed_user_agent();
 
     for (int i = 0; i < nworkers; i++) {
         app->fetch_workers.emplace_back(

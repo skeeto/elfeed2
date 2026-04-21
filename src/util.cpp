@@ -22,6 +22,16 @@ static wxStandardPaths &std_paths()
     return sp;
 }
 
+std::string elfeed_user_agent()
+{
+    // "Elfeed2/<ver> (+https://github.com/skeeto/elfeed2; feed reader)"
+    // — the "+URL" convention identifies the source to webmasters,
+    // and the "feed reader" token makes intent obvious at a glance
+    // so servers (and log-reading humans) can treat us accordingly.
+    return std::string("Elfeed2/") + ELFEED_VERSION +
+           " (+https://github.com/skeeto/elfeed2; feed reader)";
+}
+
 std::string user_data_dir()
 {
     return std_paths().GetUserDataDir().utf8_string();
