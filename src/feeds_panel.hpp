@@ -37,6 +37,17 @@ public:
 
 private:
     void on_activated(wxDataViewEvent &);
+    void on_context_menu(wxDataViewEvent &);
+    void on_key(wxKeyEvent &);
+
+    // Copy `text` to the clipboard and flash a status line so the user
+    // has some feedback that something happened. Returns false if the
+    // clipboard couldn't be opened.
+    bool copy_to_clipboard(const std::string &text);
+
+    // Return the currently-selected row (if any). Used by the
+    // right-click menu and keystroke handlers.
+    const Row *selected_row() const;
 
     Elfeed *app_;
     std::function<void(const std::string &)> on_activate_;

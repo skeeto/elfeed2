@@ -1,7 +1,10 @@
 #include "feeds_panel.hpp"
 #include "util.hpp"
 
+#include <wx/clipbrd.h>
+#include <wx/menu.h>
 #include <wx/sizer.h>
+#include <wx/utils.h>
 #include <wx/variant.h>
 
 #include <algorithm>
@@ -85,8 +88,109 @@ FeedsPanel::FeedsPanel(wxWindow *parent, Elfeed *app,
                     dataview_show_column_menu(list_,
                                               [this] { save_columns(); });
                 });
+    list_->Bind(wxEVT_DATAVIEW_ITEM_CONTEXT_MENU,
+                &FeedsPanel::on_context_menu, this);
+    list_->Bind(wxEVT_CHAR_HOOK, &FeedsPanel::on_key, this);
 
     refresh();
+}
+
+const FeedsPanel::Row *FeedsPanel::selected_row() const
+{
+    wxDataViewItem item = list_->GetSelection();
+    if (!item.IsOk()) return nullptr;
+    unsigned row = model_->GetRow(item);
+    if (row >= rows_.size()) return nullptr;
+    return &rows_[row];
+}
+
+bool FeedsPanel::copy_to_clipboard(const std::string &text)
+{
+    if (text.empty()) return false;
+    if (!wxTheClipboard->Open()) return false;
+    wxTheClipboard->SetData(
+        new wxTextDataObject(wxString::FromUTF8(text)));
+    wxTheClipboard->Close();
+    return true;
+}
+
+void FeedsPanel::on_context_menu(wxDataViewEvent &e)
+{
+    wxDataViewItem item = e.GetItem();
+    if (!item.IsOk()) return;
+    unsigned idx = model_->GetRow(item);
+    if (idx >= rows_.size()) return;
+    const Row &r = rows_[idx];
+
+    // Shortcut hints in the labels are cosmetic (the actual keystroke
+    // handling lives in on_key). Using \t so the hint right-aligns
+    // native-style; using platform-appropriate modifier spelling so
+    // macOS users see ⌘ rather than "Ctrl". The y/Ctrl+C keystrokes
+    // always prefer the canonical URL when one exists, so the hint
+    // is attached to whichever item actually receives those presses.
+#ifdef __WXOSX__
+    const char *kCopyHint = "y, \u2318C";  // U+2318 PLACE OF INTEREST SIGN
+#else
+    const char *kCopyHint = "y, Ctrl+C";
+#endif
+
+    enum { ID_CopyFeed = wxID_HIGHEST + 1,
+           ID_CopyCanonical,
+           ID_OpenBrowser };
+    wxMenu menu;
+    // Canonical URL copy only shows up when there is one — hiding
+    // rather than graying it out keeps the menu short on the common
+    // case (most feeds don't redirect).
+    if (!r.canonical_url.empty()) {
+        menu.Append(ID_CopyFeed, "Copy Feed &URL");
+        menu.Append(ID_CopyCanonical,
+                    wxString("Copy &Canonical URL\t") + kCopyHint);
+    } else {
+        menu.Append(ID_CopyFeed,
+                    wxString("Copy Feed &URL\t") + kCopyHint);
+    }
+    menu.AppendSeparator();
+    menu.Append(ID_OpenBrowser, "Open in &Browser");
+
+    // The row doesn't auto-select on right-click (macOS especially);
+    // select it so the keystroke bindings below act on the same row
+    // the user clicked.
+    list_->Select(item);
+
+    int choice = list_->GetPopupMenuSelectionFromUser(menu);
+    if (choice == ID_CopyFeed)          copy_to_clipboard(r.url);
+    else if (choice == ID_CopyCanonical) copy_to_clipboard(r.canonical_url);
+    else if (choice == ID_OpenBrowser) {
+        // Prefer the canonical URL if known — the user likely wants
+        // to verify *where it redirects to*, not watch the redirect
+        // happen again.
+        const std::string &target =
+            r.canonical_url.empty() ? r.url : r.canonical_url;
+        wxLaunchDefaultBrowser(wxString::FromUTF8(target));
+    }
+}
+
+void FeedsPanel::on_key(wxKeyEvent &e)
+{
+    int code = e.GetKeyCode();
+    // `y` matches the entry list's "copy link" convention; Cmd/Ctrl+C
+    // covers the OS-standard expectation. Both copy the canonical URL
+    // when known, otherwise the feed URL — the URL the user most
+    // likely wants is always the most-up-to-date one.
+    bool is_y = (code == 'Y' || code == 'y') &&
+                !e.RawControlDown() && !e.AltDown() && !e.MetaDown();
+    bool is_copy = (code == 'C' || code == 'c') &&
+                   (e.RawControlDown() || e.ControlDown()) &&
+                   !e.AltDown();
+    if (is_y || is_copy) {
+        if (const Row *r = selected_row()) {
+            const std::string &target =
+                r->canonical_url.empty() ? r->url : r->canonical_url;
+            copy_to_clipboard(target);
+        }
+        return;
+    }
+    e.Skip();
 }
 
 void FeedsPanel::save_columns()
