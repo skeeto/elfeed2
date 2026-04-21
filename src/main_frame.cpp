@@ -38,7 +38,7 @@ MainFrame::MainFrame(Elfeed *app)
 {
     app_->event_sink = this;
 
-    SetClientSize(FromDIP(wxSize(1200, 800)));
+    SetClientSize(FromDIP(wxSize(1500, 900)));
     Centre();
 
     build_menus();
@@ -130,45 +130,66 @@ void MainFrame::build_widgets()
     log_       = new LogPanel(aui_host, app_);
     downloads_ = new DownloadsPanel(aui_host, app_);
 
+    // Default layout at the 1500x900 default client size:
+    //   Feeds   left   250 px (1/6 of width), full height
+    //   Preview right  500 px (1/3 of width), full height
+    //   Center: entry list on top + Downloads docked beneath, sharing
+    //           the middle 750 px column. Downloads is 180 px (1/5
+    //           of height); list takes the remaining 720 px (4/5).
+    //
+    // Layer matters: feeds and preview at Layer(1) become outer columns
+    // that span the full window height, while downloads at Layer(0)
+    // sits in the inner ring directly under the central pane and
+    // doesn't extend under the side columns. wxAUI's "onion" docking:
+    // higher layer = farther from center.
+    //
+    // wxAUI ignores wxAuiPaneInfo::BestSize for layered side docks; it
+    // uses MinSize as the floor and the contained panel's intrinsic
+    // best size otherwise. The only knob that reliably pins the
+    // initial dock dimensions is MinSize itself, so we set it to the
+    // desired width/height. This means users can't drag a pane
+    // narrower than the default — the workaround is to hide the pane
+    // entirely via the View menu or the column-header context menu.
     mgr_.AddPane(list_,
                  wxAuiPaneInfo()
                      .Name("entry_list")
                      .CenterPane()
                      .CaptionVisible(false));
-    mgr_.AddPane(detail_,
-                 wxAuiPaneInfo()
-                     .Name("entry_detail")
-                     .Caption("Preview")
-                     .Bottom()
-                     .BestSize(FromDIP(wxSize(-1, 350)))
-                     .MinSize(FromDIP(wxSize(-1, 100)))
-                     .Show());
     mgr_.AddPane(feeds_,
                  wxAuiPaneInfo()
                      .Name("feeds")
                      .Caption("Feeds")
                      .Left()
-                     .BestSize(FromDIP(wxSize(220, -1)))
-                     .MinSize(FromDIP(wxSize(150, -1)))
-                     .Hide());
-    mgr_.AddPane(log_,
+                     .Layer(1)
+                     .MinSize(FromDIP(wxSize(250, -1)))
+                     .Show());
+    mgr_.AddPane(detail_,
                  wxAuiPaneInfo()
-                     .Name("log")
-                     .Caption("Log")
-                     .Bottom()
-                     .BestSize(FromDIP(wxSize(-1, 200)))
-                     .MinSize(FromDIP(wxSize(-1, 80)))
-                     .Hide());
+                     .Name("entry_detail")
+                     .Caption("Preview")
+                     .Right()
+                     .Layer(1)
+                     .MinSize(FromDIP(wxSize(500, -1)))
+                     .Show());
     mgr_.AddPane(downloads_,
                  wxAuiPaneInfo()
                      .Name("downloads")
                      .Caption("Downloads")
                      .Bottom()
-                     .BestSize(FromDIP(wxSize(-1, 200)))
-                     .MinSize(FromDIP(wxSize(-1, 80)))
+                     .Layer(0)
+                     .MinSize(FromDIP(wxSize(-1, 180)))
+                     .Show());
+    mgr_.AddPane(log_,
+                 wxAuiPaneInfo()
+                     .Name("log")
+                     .Caption("Log")
+                     .Bottom()
+                     .Layer(0)
+                     .MinSize(FromDIP(wxSize(-1, 200)))
                      .Hide());
 
-    // Restore saved layout if present; otherwise keep defaults.
+    // Restore saved layout if present; otherwise the AddPane MinSize
+    // hints above govern the initial dock dimensions.
     std::string saved = db_load_ui_state(app_, "layout");
     if (!saved.empty())
         mgr_.LoadPerspective(wxString::FromUTF8(saved), false);
