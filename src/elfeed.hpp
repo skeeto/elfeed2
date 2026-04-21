@@ -157,6 +157,16 @@ struct Elfeed {
     std::vector<std::thread> fetch_workers;
     std::atomic<bool> fetch_running{false};
 
+    // Epoch seconds when the last F5 / Fetch-All batch completed.
+    // 0 means "never fetched". Persisted to ui_state so the "X
+    // minutes ago" display survives restarts. The UI-thread-only
+    // flag fetch_ran_since_status tracks whether a running batch
+    // has transitioned to done since we last observed it, so
+    // fetch_process_results can stamp last_fetch exactly once per
+    // completed batch.
+    double last_fetch = 0;
+    bool   last_fetch_seen_running = false;
+
     // Downloads (all state is UI-thread-only; no mutex needed).
     // download_process is non-null while a child is running; wxProcess
     // self-deletes after OnTerminate fires so we just nil the pointer.

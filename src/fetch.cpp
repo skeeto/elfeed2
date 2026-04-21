@@ -141,14 +141,31 @@ bool fetch_process_results(Elfeed *app)
         app->fetch_inbox.clear();
     }
 
+    // Detect the running→done transition so we stamp last_fetch
+    // exactly once per batch, regardless of whether any feed
+    // actually had new entries. Called on every UI wake, so the
+    // observation chain is: (a) fetch_all flips fetch_running true,
+    // (b) workers wake UI repeatedly with running=true (we record
+    // this), (c) last worker flips it false and wakes UI a final
+    // time (this is when `just_finished` fires).
+    bool running_now = app->fetch_running.load();
+    bool just_finished = app->last_fetch_seen_running && !running_now;
+    app->last_fetch_seen_running = running_now;
+
     // Reap finished worker threads when the batch is over
-    if (!app->fetch_running.load()) {
+    if (!running_now) {
         for (auto &t : app->fetch_workers)
             if (t.joinable()) t.join();
         app->fetch_workers.clear();
     }
 
-    if (results.empty()) return false;
+    if (just_finished) {
+        app->last_fetch = (double)time(nullptr);
+        db_save_ui_state(app, "last_fetch",
+                         std::to_string(app->last_fetch).c_str());
+    }
+
+    if (results.empty()) return just_finished;
 
     for (auto &r : results) {
         Feed *feed = nullptr;

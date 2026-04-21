@@ -99,6 +99,11 @@ std::string format_date(double epoch);          // "YYYY-MM-DD"
 std::string format_datetime(double epoch);      // "YYYY-MM-DD HH:MM:SS"
 std::string format_date_compact(double epoch);  // "YYYYMMDD"
 
+// Human-friendly relative time: "just now", "5m ago", "3h ago",
+// "2d ago", "4w ago", or a full date for anything older than a
+// month. Returns "never" for a 0 / negative `epoch`.
+std::string format_relative_time(double epoch);
+
 // ---- Filename building ----
 
 // Sanitize one path segment:

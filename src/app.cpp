@@ -66,6 +66,16 @@ void elfeed_init(Elfeed *app)
 
     db_load_feed_titles(app);
 
+    // Restore "last fetch was N ago" counter across restarts. Stored
+    // as an epoch-seconds string in ui_state; empty or unparseable
+    // means "never fetched," which format_relative_time renders as
+    // "never".
+    std::string ts = db_load_ui_state(app, "last_fetch");
+    if (!ts.empty()) {
+        try { app->last_fetch = std::stod(ts); }
+        catch (...) { app->last_fetch = 0; }
+    }
+
     app->current_filter = filter_parse(app->default_filter);
 }
 

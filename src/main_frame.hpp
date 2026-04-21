@@ -3,6 +3,7 @@
 
 #include <wx/aui/framemanager.h>
 #include <wx/frame.h>
+#include <wx/timer.h>
 #include "elfeed.hpp"
 
 class EntryList;
@@ -100,6 +101,12 @@ private:
     // every move/resize; saved at close time so "quit while maximized,
     // relaunch, un-maximize" restores the previous floating window.
     wxRect normal_rect_;
+
+    // Ticks the "last fetch: Nm ago" counter in the status bar when
+    // nothing else is driving update_status. 60 seconds matches the
+    // minute-level display resolution; past an hour the display
+    // changes rarely enough that the interval is invisible.
+    wxTimer status_timer_;
 };
 
 #endif

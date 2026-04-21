@@ -99,6 +99,23 @@ std::string format_date_compact(double epoch)
     return dt.Format("%Y%m%d").utf8_string();
 }
 
+std::string format_relative_time(double epoch)
+{
+    if (epoch <= 0) return "never";
+    double now = (double)::time(nullptr);
+    double diff = now - epoch;
+    if (diff < 0) diff = 0;          // clock skew: treat as "just now"
+    if (diff < 60)          return "just now";
+    if (diff < 3600)        return std::to_string((int)(diff / 60))    + "m ago";
+    if (diff < 86400)       return std::to_string((int)(diff / 3600))  + "h ago";
+    if (diff < 86400 * 7)   return std::to_string((int)(diff / 86400)) + "d ago";
+    if (diff < 86400 * 30)  return std::to_string((int)(diff / (86400 * 7))) + "w ago";
+    // Older than a month: show the date itself. Relative units
+    // stop being useful ("3mo ago" vs "last spring"); the date
+    // is unambiguous and shorter in the status bar.
+    return format_date(epoch);
+}
+
 // ---- Filename building --------------------------------------------
 
 std::string sanitize_filename(const std::string &s)

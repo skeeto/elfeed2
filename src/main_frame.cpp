@@ -88,6 +88,16 @@ MainFrame::MainFrame(Elfeed *app)
     update_status();
     update_menu_checks();
 
+    // Tick the status bar every 60s so "last fetch: Nm ago" advances
+    // even when the user isn't interacting. Matches the minute-level
+    // resolution of the display for the first hour; past that the
+    // display changes rarely enough that the interval is invisible.
+    status_timer_.SetOwner(this);
+    Bind(wxEVT_TIMER,
+         [this](wxTimerEvent &) { update_status(); },
+         status_timer_.GetId());
+    status_timer_.Start(60 * 1000);
+
     // Focus the entry list so vi-style keys work immediately.
     CallAfter([this] { list_->SetFocus(); });
 }
@@ -336,17 +346,24 @@ void MainFrame::update_status()
     // literals route through wxConvLibc, which on Windows is CP1252
     // and mangles UTF-8 bytes. Wide literals skip that path entirely.
     wxString msg;
-    if (active > 0)
+    if (active > 0) {
         msg = wxString::Format(
             wxT("Fetching %d/%d …  %d unread of %d  ·  %d feeds"),
             active, total, unread,
             (int)app_->entries.size(),
             (int)app_->feeds.size());
-    else
+    } else {
+        // Append "last fetch" so the user can tell at a glance how
+        // stale the view is. We don't poll automatically — this is
+        // the nudge that tells them when it's time to F5.
+        wxString last = wxString::FromUTF8(
+            format_relative_time(app_->last_fetch));
         msg = wxString::Format(
-            wxT("%d unread of %d  ·  %d feeds"),
+            wxT("%d unread of %d  ·  %d feeds  ·  last fetch: %s"),
             unread, (int)app_->entries.size(),
-            (int)app_->feeds.size());
+            (int)app_->feeds.size(),
+            last);
+    }
     SetStatusText(msg);
 }
 
