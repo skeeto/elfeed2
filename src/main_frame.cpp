@@ -579,6 +579,37 @@ void MainFrame::on_filter_key(wxKeyEvent &e)
         list_->SetFocus();
         return;
     }
+
+    // Ctrl+W: delete previous whitespace-delimited word. Shell/readline
+    // style — treats `+unread` and `@6-months-ago` as single words,
+    // unlike the platform-native Alt+Backspace which breaks at non-alnum
+    // punctuation. RawControlDown() is the physical Ctrl key; on macOS
+    // ControlDown() is Cmd, which we must not shadow (Cmd+W = close).
+    if (code == 'W' && e.RawControlDown() &&
+        !e.AltDown() && !e.MetaDown()) {
+        long from = 0, to = 0;
+        filter_->GetSelection(&from, &to);
+        if (from != to) {
+            filter_->Remove(from, to);
+            filter_->SetInsertionPoint(from);
+            return;
+        }
+        wxString text = filter_->GetValue();
+        long pos = filter_->GetInsertionPoint();
+        long left = pos;
+        while (left > 0 &&
+               (text[left - 1] == ' ' || text[left - 1] == '\t'))
+            left--;
+        while (left > 0 &&
+               text[left - 1] != ' ' && text[left - 1] != '\t')
+            left--;
+        if (left < pos) {
+            filter_->Remove(left, pos);
+            filter_->SetInsertionPoint(left);
+        }
+        return;
+    }
+
     e.Skip();
 }
 
