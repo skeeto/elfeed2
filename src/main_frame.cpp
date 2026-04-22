@@ -13,11 +13,14 @@
 #include <wx/aui/framemanager.h>
 #include <wx/busyinfo.h>
 #include <wx/clipbrd.h>
-#include <wx/aboutdlg.h>
+#include <wx/dialog.h>
 #include <wx/display.h>
 #include <wx/filedlg.h>
+#include <wx/hyperlink.h>
 #include <wx/icon.h>
 #include <wx/menu.h>
+#include <wx/stattext.h>
+#include <wx/textctrl.h>
 #include <wx/msgdlg.h>
 #include <wx/srchctrl.h>
 #include <wx/sizer.h>
@@ -601,35 +604,80 @@ void MainFrame::on_reset_layout(wxCommandEvent &)
 
 void MainFrame::on_about(wxCommandEvent &)
 {
-    // Generic wxAboutDialog (rather than the macOS native panel)
-    // because we want the WebSite link to be clickable and the
-    // License section to be scrollable. wxAboutBox auto-routes to
-    // the generic dialog whenever any of those richer fields are
-    // populated, which is what we want here.
-    wxAboutDialogInfo info;
-    info.SetName("Elfeed2");
-    info.SetVersion(ELFEED_VERSION);
-    info.SetDescription(
+    // Custom dialog instead of wxAboutBox. The generic wxAboutDialog
+    // wraps the license in a wxCollapsiblePane whose expansion path
+    // does top->SetClientSize(sizer->ComputeFittingClientSize(top)),
+    // and the static text inside that pane is created with a Wrap()
+    // hint of wxGetDisplaySize().x / 3. On a wide macOS display
+    // that's ~1700px and the dialog blows up to that size on expand.
+    // Owning the layout here sidesteps both issues.
+    wxDialog dlg(this, wxID_ANY, "About Elfeed2",
+                 wxDefaultPosition, wxDefaultSize,
+                 wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER);
+
+    auto *outer = new wxBoxSizer(wxVERTICAL);
+    int pad = dlg.FromDIP(10);
+
+    // Heading: Elfeed2 (large, bold) + version (subdued).
+    auto *name = new wxStaticText(&dlg, wxID_ANY, "Elfeed2");
+    {
+        wxFont f = name->GetFont();
+        f.SetPointSize(f.GetPointSize() + 6);
+        f.MakeBold();
+        name->SetFont(f);
+    }
+    outer->Add(name, 0, wxALIGN_CENTRE | wxTOP, pad);
+
+    auto *ver = new wxStaticText(&dlg, wxID_ANY,
+                                 wxString("Version " ELFEED_VERSION));
+    outer->Add(ver, 0, wxALIGN_CENTRE | wxTOP, dlg.FromDIP(2));
+
+    auto *desc = new wxStaticText(&dlg, wxID_ANY,
         wxT("A standalone feed reader, successor to Emacs Elfeed."));
-    info.SetCopyright(wxT("Public Domain (Unlicense)"));
-    info.SetWebSite("https://github.com/skeeto/elfeed2",
-                    "github.com/skeeto/elfeed2");
-    // The "License" tab/section lists bundled third-party
-    // components and their licenses. Useful for users verifying
-    // redistribution constraints. Versions match what CMakeLists
-    // pulls via FetchContent — keep them in sync if those bump.
-    info.SetLicense(wxT(
-        "Elfeed2 is released into the public domain.\n"
-        "See https://unlicense.org/ for details.\n"
-        "\n"
-        "Bundled third-party components:\n"
-        "\n"
+    outer->Add(desc, 0, wxALIGN_CENTRE | wxTOP, pad);
+
+    // Clickable project URL.
+    auto *link = new wxHyperlinkCtrl(&dlg, wxID_ANY,
+        "github.com/skeeto/elfeed2",
+        "https://github.com/skeeto/elfeed2");
+    outer->Add(link, 0, wxALIGN_CENTRE | wxTOP, pad);
+
+    auto *copyright = new wxStaticText(&dlg, wxID_ANY,
+        wxT("Public Domain (Unlicense)"));
+    outer->Add(copyright, 0, wxALIGN_CENTRE | wxTOP, dlg.FromDIP(4));
+
+    auto *deps_label = new wxStaticText(&dlg, wxID_ANY,
+                                        wxT("Bundled components:"));
+    outer->Add(deps_label, 0, wxLEFT | wxRIGHT | wxTOP, pad);
+
+    // wxTextCtrl multi-line so the deps list scrolls inside the
+    // dialog instead of pushing the dialog's outer size to fit.
+    // Read-only; users can still select / copy. Versions track
+    // what FetchContent pulls in CMakeLists — keep them in sync
+    // when bumping deps.
+    auto *deps = new wxTextCtrl(&dlg, wxID_ANY, wxT(
         "  wxWidgets 3.2.10        wxWindows Library Licence\n"
         "  cpp-httplib 0.43.0      MIT\n"
         "  mbedTLS 3.6.2           Apache License 2.0\n"
         "  pugixml 1.14            MIT\n"
-        "  SQLite 3.49.1           Public Domain\n"));
-    wxAboutBox(info, this);
+        "  SQLite 3.49.1           Public Domain\n"),
+        wxDefaultPosition, dlg.FromDIP(wxSize(420, 120)),
+        wxTE_MULTILINE | wxTE_READONLY | wxTE_DONTWRAP);
+    // Monospace face so the columns of name + license align.
+    {
+        wxFont mono(wxFontInfo(deps->GetFont().GetPointSize())
+                        .Family(wxFONTFAMILY_TELETYPE));
+        deps->SetFont(mono);
+    }
+    outer->Add(deps, 1, wxEXPAND | wxLEFT | wxRIGHT, pad);
+
+    auto *btns = dlg.CreateButtonSizer(wxOK);
+    outer->Add(btns, 0, wxEXPAND | wxALL, pad);
+
+    dlg.SetSizerAndFit(outer);
+    dlg.SetMinSize(dlg.GetSize());
+    dlg.CentreOnParent();
+    dlg.ShowModal();
 }
 
 void MainFrame::on_quit(wxCommandEvent &)
