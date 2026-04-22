@@ -27,8 +27,11 @@ void reveal_in_file_manager(const std::string &path)
     if (path.empty()) return;
     wxString p = wxString::FromUTF8(path);
 
+#if defined(__WXMAC__) || defined(__WXMSW__)
     // Shell-quote with double quotes; escape embedded `"` so a
     // pathological filename can't break out of the quoted argument.
+    // Lambda only declared on platforms that use it — without the
+    // ifdef guard it triggers -Wunused-but-set-variable on Linux.
     auto quote = [](const wxString &s) {
         wxString out = "\"";
         for (size_t i = 0; i < s.size(); i++) {
@@ -38,6 +41,7 @@ void reveal_in_file_manager(const std::string &path)
         out += "\"";
         return out;
     };
+#endif
 
 #if defined(__WXMAC__)
     // `open -R` reveals (selects) the file in its Finder window.
