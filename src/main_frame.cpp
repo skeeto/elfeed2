@@ -124,6 +124,16 @@ MainFrame::MainFrame(Elfeed *app)
          [this](wxTimerEvent &) { update_status(); },
          flash_timer_.GetId());
 
+    // Coalesce log persistence: flush the in-memory log to the DB
+    // every 5 seconds rather than on every UI wake. on_close also
+    // calls log_drain_to_db so a clean exit catches the last
+    // unwritten window.
+    log_drain_timer_.SetOwner(this);
+    Bind(wxEVT_TIMER,
+         [this](wxTimerEvent &) { log_drain_to_db(app_); },
+         log_drain_timer_.GetId());
+    log_drain_timer_.Start(5 * 1000);
+
     // Focus the entry list so vi-style keys work immediately.
     CallAfter([this] { list_->SetFocus(); });
 }
@@ -495,11 +505,12 @@ void MainFrame::on_wake(wxThreadEvent &)
     // replace the broken <img> boxes.
     if (image_cache_process_results(app_) && detail_)
         detail_->relayout();
-    // Persist whatever new log entries the workers produced this
-    // wake-cycle. Cheap when nothing's new (early-exits under the
-    // mutex check), batches multiple entries per transaction when
-    // there are many.
-    log_drain_to_db(app_);
+    // Note: log persistence is intentionally NOT drained here.
+    // on_wake fires very often (per fetch result, per image
+    // download, per download tick) and a synchronous SQLite
+    // commit per wake would freeze the UI on a fetch storm. A
+    // dedicated 5-second timer handles drain instead; on_close
+    // does a final drain so a clean exit doesn't lose entries.
     update_status();
     download_tick(app_);
     if (pane_shown("log")       && log_)       log_->refresh();
@@ -756,6 +767,11 @@ void MainFrame::on_close(wxCloseEvent &)
              normal_rect_.width, normal_rect_.height,
              maxi ? 1 : 0);
     db_save_ui_state(app_, "geometry", buf);
+
+    // Final log drain so any unsaved entries from this session
+    // make it to the DB. The 5-second drain timer can lag the
+    // last few seconds of activity by definition.
+    log_drain_to_db(app_);
 
     mgr_.UnInit();
     Destroy();

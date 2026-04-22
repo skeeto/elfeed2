@@ -134,6 +134,13 @@ private:
     // One-shot timer for flash_status: restores the regular status
     // text a couple seconds after a transient confirmation was shown.
     wxTimer flash_timer_;
+
+    // Coalesces log_drain_to_db calls. Without it, every UI wake
+    // (and there are many during a fetch storm) does its own
+    // fsync-on-commit transaction. Firing every 5s keeps disk I/O
+    // bounded; final drain happens at on_close so we don't lose
+    // recent entries on a clean exit.
+    wxTimer log_drain_timer_;
 };
 
 #endif
