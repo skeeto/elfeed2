@@ -64,6 +64,12 @@ private:
     // ---- Pane helpers ----
     void toggle_pane(const char *name);
     bool pane_shown(const char *name) const;
+    // Reset the four side/bottom panes' MinSize to a small floor so
+    // the user can drag any pane narrower than its construction
+    // default. Must be called after every LoadPerspective (initial
+    // load and Reset Layout), since the perspective string carries
+    // MinSize and re-applying it would put the floors back.
+    void loosen_pane_min_sizes();
 
     // ---- Events ----
     void on_wake(wxThreadEvent &);

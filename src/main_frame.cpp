@@ -224,13 +224,15 @@ void MainFrame::build_widgets()
     // doesn't extend under the side columns. wxAUI's "onion" docking:
     // higher layer = farther from center.
     //
-    // wxAUI ignores wxAuiPaneInfo::BestSize for layered side docks; it
-    // uses MinSize as the floor and the contained panel's intrinsic
-    // best size otherwise. The only knob that reliably pins the
-    // initial dock dimensions is MinSize itself, so we set it to the
-    // desired width/height. This means users can't drag a pane
-    // narrower than the default — the workaround is to hide the pane
-    // entirely via the View menu or the column-header context menu.
+    // wxAUI ignores wxAuiPaneInfo::BestSize for layered side docks;
+    // it uses MinSize as the floor and the contained panel's
+    // intrinsic best size otherwise. The only knob that reliably
+    // pins the initial dock dimensions is MinSize itself, so we set
+    // it here to the desired width/height. We then drop these floors
+    // back to a tiny size after the first mgr_.Update() (below) so
+    // the user can drag panes narrower than the construction
+    // defaults — the dock_size is captured in the saved perspective
+    // by then and doesn't need MinSize to survive.
     mgr_.AddPane(list_,
                  wxAuiPaneInfo()
                      .Name("entry_list")
@@ -269,17 +271,35 @@ void MainFrame::build_widgets()
                      .MinSize(FromDIP(wxSize(-1, 200)))
                      .Hide());
 
-    // Run an initial Update with just the construction-time defaults so
-    // wxAUI computes the dock_size entries we want. Snapshot the
-    // resulting perspective for "Reset Layout" before any saved
-    // perspective is applied on top.
+    // Run an initial Update with just the construction-time defaults
+    // so wxAUI computes dock_size entries from the MinSize hints
+    // above. Snapshot the resulting perspective for Reset Layout
+    // before any saved perspective is applied on top — the snapshot
+    // includes the MinSize values, but loosen_pane_min_sizes() will
+    // override them after every load (initial and Reset).
     mgr_.Update();
     default_perspective_ = mgr_.SavePerspective();
 
     std::string saved = db_load_ui_state(app_, "layout");
-    if (!saved.empty()) {
+    if (!saved.empty())
         mgr_.LoadPerspective(wxString::FromUTF8(saved), false);
-        mgr_.Update();
+
+    // Drop the MinSize hints so the user can drag any pane narrower
+    // than its construction default. Done AFTER LoadPerspective
+    // because the perspective string carries MinSize and applying
+    // it would put the floors back. Done in Reset Layout too via
+    // the same helper.
+    loosen_pane_min_sizes();
+    mgr_.Update();
+}
+
+void MainFrame::loosen_pane_min_sizes()
+{
+    const wxSize floor = FromDIP(wxSize(40, 40));
+    for (const char *name :
+         {"feeds", "entry_detail", "downloads", "log"}) {
+        wxAuiPaneInfo &pi = mgr_.GetPane(name);
+        if (pi.IsOk()) pi.MinSize(floor);
     }
 }
 
@@ -588,6 +608,11 @@ void MainFrame::on_reset_layout(wxCommandEvent &)
     // deliberately preserved — those aren't layout per se.
     if (!default_perspective_.empty()) {
         mgr_.LoadPerspective(default_perspective_, false);
+        // The snapshotted perspective carries the original MinSize
+        // values; loosen them again so resizing stays free after a
+        // reset. (Same reason loosen_pane_min_sizes runs after
+        // every LoadPerspective on startup.)
+        loosen_pane_min_sizes();
         mgr_.Update();
         db_save_ui_state(app_, "layout",
                          default_perspective_.utf8_string().c_str());
