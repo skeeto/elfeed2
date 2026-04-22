@@ -198,29 +198,67 @@ void LogPanel::apply_sort()
 
 void LogPanel::refresh()
 {
-    snapshot_.clear();
+    // Called from on_wake for every UI wake event — many per second
+    // during a fetch storm, almost all unrelated to the log. Skip
+    // the full snapshot rebuild when neither the log size nor the
+    // kind-filter mask has changed; otherwise the unconditional
+    // model->Reset() below scrolls the view back to the top and
+    // makes the log un-scrollable while anything is ticking.
+    size_t current_size;
     {
         std::lock_guard lock(app_->log_mutex);
-        snapshot_.reserve(app_->log.size());
-        for (auto &e : app_->log) {
-            bool keep = false;
-            switch (e.kind) {
-            case LOG_INFO:    keep = app_->log_show_info; break;
-            case LOG_REQUEST: keep = app_->log_show_requests; break;
-            case LOG_SUCCESS: keep = app_->log_show_success; break;
-            case LOG_ERROR:   keep = app_->log_show_errors; break;
-            }
-            if (keep) snapshot_.push_back(e);
-        }
+        current_size = app_->log.size();
     }
-    apply_sort();
-    model_->Reset((unsigned int)snapshot_.size());
+    int filter_mask =
+        (app_->log_show_info     ? 1 : 0) |
+        (app_->log_show_requests ? 2 : 0) |
+        (app_->log_show_success  ? 4 : 0) |
+        (app_->log_show_errors   ? 8 : 0);
+
+    bool need_rebuild =
+        (current_size != last_log_size_) ||
+        (filter_mask  != last_filter_mask_);
+
+    if (need_rebuild) {
+        snapshot_.clear();
+        {
+            std::lock_guard lock(app_->log_mutex);
+            snapshot_.reserve(app_->log.size());
+            for (auto &e : app_->log) {
+                bool keep = false;
+                switch (e.kind) {
+                case LOG_INFO:    keep = app_->log_show_info;     break;
+                case LOG_REQUEST: keep = app_->log_show_requests; break;
+                case LOG_SUCCESS: keep = app_->log_show_success;  break;
+                case LOG_ERROR:   keep = app_->log_show_errors;   break;
+                }
+                if (keep) snapshot_.push_back(e);
+            }
+        }
+        apply_sort();
+        model_->Reset((unsigned int)snapshot_.size());
+        last_log_size_    = current_size;
+        last_filter_mask_ = filter_mask;
+    }
+
     // Auto-scroll only makes sense when the newest message is last —
     // i.e. chronological (no sort, or Time ascending). For other
     // orderings we'd fight the user; leave scroll where it is.
+    //
+    // And only trigger it when there's a reason: fresh data just
+    // arrived (need_rebuild) OR the user just flipped auto-scroll
+    // ON (so the panel should catch up to the bottom). Otherwise
+    // this call would fight the user's manual scroll.
+    bool autoscroll_on      = app_->log_auto_scroll;
+    bool autoscroll_enabled = autoscroll_on && !last_autoscroll_;
+    last_autoscroll_ = autoscroll_on;
+
     DataViewSort s = dataview_current_sort(list_);
     bool chronological = (s.col < 0) || (s.col == 0 && s.ascending);
-    if (app_->log_auto_scroll && chronological && !snapshot_.empty()) {
+    bool should_scroll =
+        autoscroll_on && chronological && !snapshot_.empty() &&
+        (need_rebuild || autoscroll_enabled);
+    if (should_scroll) {
         wxDataViewItem last = model_->GetItem(
             (unsigned int)snapshot_.size() - 1);
         list_->EnsureVisible(last);

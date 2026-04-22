@@ -51,6 +51,15 @@ private:
     friend class LogListModel;
     std::vector<LogEntry> snapshot_;
     std::vector<std::string> default_order_;
+
+    // Change-tracking for refresh() so it short-circuits on the
+    // common "on_wake polled me but nothing actually happened" path.
+    // Without this, every wake event re-runs model->Reset(), which
+    // yanks the user's manual scroll back to the top and makes the
+    // log un-scrollable during active fetches.
+    size_t last_log_size_     = 0;
+    int    last_filter_mask_  = -1;  // sentinel: never refreshed
+    bool   last_autoscroll_   = false;
 };
 
 #endif
