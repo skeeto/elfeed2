@@ -474,11 +474,17 @@ void db_query_entries(Elfeed *app, const Filter &filter,
 
     // Explicit `#N` in the filter wins; otherwise fall back to
     // the caller's viewport-derived default (0 = unlimited).
+    // The limit is enforced in the C++ scan loop below, not as
+    // a SQL LIMIT clause: in-memory regex/feed filters drop rows
+    // after the SQL step, so a SQL LIMIT would cap "rows
+    // considered" rather than "rows kept" — a strict filter
+    // like `+unread linux` would then return far fewer than N
+    // entries even though many more matched further down the
+    // index. The index is already ORDER BY date DESC so SQLite
+    // streams rows in display order; stopping sqlite3_step when
+    // we've collected enough is equivalent to LIMIT for cost.
     int effective_limit =
         filter.limit > 0 ? filter.limit : default_limit;
-    if (effective_limit > 0) {
-        sql += " LIMIT " + std::to_string(effective_limit);
-    }
 
     sqlite3_stmt *stmt;
     if (sqlite3_prepare_v2(app->db, sql.c_str(), -1, &stmt, nullptr) != SQLITE_OK)
@@ -623,8 +629,16 @@ void db_query_entries(Elfeed *app, const Filter &filter,
             }
         }
 
-        if (keep)
+        if (keep) {
             out.push_back(std::move(e));
+            // Post-filter cap: stop once we've collected enough
+            // passing entries. See the comment next to
+            // effective_limit above for why this is the C++
+            // loop's job rather than a SQL LIMIT.
+            if (effective_limit > 0 &&
+                (int)out.size() >= effective_limit)
+                break;
+        }
     }
 
     sqlite3_finalize(stmt);
