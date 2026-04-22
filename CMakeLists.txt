@@ -43,6 +43,14 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# CMake 3.28+ runs a `-fdeps-format=p1689r5` module-dependency scan
+# before every C++20 compile. We use no C++20 modules (only the
+# language features), so the scan is pure overhead AND defeats
+# ccache: each scan is a `-E` preprocess-only invocation, which
+# ccache passes through as a miss by design. Turning the scan off
+# both speeds up builds and lets ccache hit on the real compiles.
+set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
+
 # Pin C to gnu17 so wxWidgets' bundled C deps (zlib, libpng, libjpeg,
 # libtiff, expat) build cleanly under GCC's newer C23 default.
 set(CMAKE_C_STANDARD 17)
