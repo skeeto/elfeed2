@@ -46,9 +46,23 @@ set(wxBUILD_TESTS   OFF CACHE BOOL "" FORCE)
 set(wxBUILD_SAMPLES OFF CACHE BOOL "" FORCE)
 set(wxBUILD_DEMOS   OFF CACHE BOOL "" FORCE)
 set(wxBUILD_INSTALL OFF CACHE BOOL "" FORCE)
-set(wxUSE_STC       OFF CACHE BOOL "" FORCE)
-set(wxUSE_WEBVIEW   OFF CACHE BOOL "" FORCE)
-set(wxUSE_MEDIACTRL OFF CACHE BOOL "" FORCE)
+
+# Disable wxWidgets subsystems we don't use. Each one drops source
+# files from wx's own build (faster initial compile) AND removes
+# the corresponding object code from the linked binary. Re-enable
+# any of these the day a feature actually needs them.
+set(wxUSE_STC                    OFF CACHE BOOL "" FORCE)  # Scintilla
+set(wxUSE_WEBVIEW                OFF CACHE BOOL "" FORCE)  # WebKit/WebView2
+set(wxUSE_MEDIACTRL              OFF CACHE BOOL "" FORCE)  # audio/video
+set(wxUSE_RICHTEXT               OFF CACHE BOOL "" FORCE)  # rich-text editor
+set(wxUSE_PROPGRID               OFF CACHE BOOL "" FORCE)  # property grid
+set(wxUSE_RIBBON                 OFF CACHE BOOL "" FORCE)  # Office ribbon
+set(wxUSE_OPENGL                 OFF CACHE BOOL "" FORCE)  # GL canvas
+set(wxUSE_GLCANVAS               OFF CACHE BOOL "" FORCE)
+set(wxUSE_PRINTING_ARCHITECTURE  OFF CACHE BOOL "" FORCE)  # print preview
+set(wxUSE_HELP                   OFF CACHE BOOL "" FORCE)  # help system
+set(wxUSE_WXHTML_HELP            OFF CACHE BOOL "" FORCE)  # html-based help
+set(wxUSE_DEBUGREPORT            OFF CACHE BOOL "" FORCE)  # crash reports
 
 # The release tarball includes all bundled third-party sources inline
 # (zlib, libpng, libjpeg, libtiff, expat, …), so unlike the git repo
