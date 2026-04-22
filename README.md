@@ -189,7 +189,7 @@ Age units: `year`/`y`, `month`/`M`, `week`/`w`, `day`/`d`, `hour`/`h`,
 | `y`         | Copy entry link to clipboard             |
 | `u`         | Mark unread (advances cursor)            |
 | `r`         | Mark read (advances cursor)              |
-| `R`         | Refresh filter                           |
+| `Ctrl+L`    | Re-apply filter (re-query)               |
 | `v`         | Toggle visual selection                  |
 | `Ctrl+A`    | Select all entries                       |
 | `s` / `/`   | Edit filter                              |

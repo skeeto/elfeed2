@@ -920,6 +920,18 @@ void MainFrame::on_list_key(wxKeyEvent &e)
         list_->SelectAll();
         return;
     }
+    // Ctrl+L: re-apply the current filter. Same mental model as
+    // vi/terminal Ctrl+L (redraw screen) — handy after toggling
+    // the `unread` tag on a row under a `+unread` filter, since
+    // the row stays visible until the next requery. Physical Ctrl
+    // only (RawControlDown); on macOS we deliberately don't bind
+    // Cmd+L, which browsers use for address-bar focus and users
+    // may have elsewhere-muscle-memory for.
+    if (code == 'L' && e.RawControlDown() &&
+        !e.AltDown() && !e.MetaDown()) {
+        requery();
+        return;
+    }
     // Escape: two-stage reset. If visual-selection mode is on, the
     // first press exits it (leaves the range selected, in case the
     // user still wants to act on it). The next press, with no
