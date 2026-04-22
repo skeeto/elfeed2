@@ -74,6 +74,17 @@ void dataview_apply_columns(wxDataViewCtrl *ctrl, const std::string &saved);
 std::vector<std::string>
 dataview_parse_column_order(const std::string &saved);
 
+// Merge a saved column order with the panel's default order. The
+// saved order takes precedence for titles the user has seen before;
+// any titles only in `default_order` (e.g. columns added in a later
+// release) are inserted at the position relative to the surrounding
+// saved titles, mirroring where they sit in `default_order`. Titles
+// in `saved` that aren't in `default_order` are dropped (no longer
+// known to the panel).
+std::vector<std::string>
+dataview_merge_column_order(const std::vector<std::string> &saved,
+                            const std::vector<std::string> &default_order);
+
 // Pop up a context menu listing each column with a checkbox for its
 // visibility. Toggling an item flips the column's hidden state and
 // invokes `on_change` (typically used to persist the new state).

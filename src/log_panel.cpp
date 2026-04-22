@@ -338,16 +338,8 @@ void LogPanel::append_column(const wxString &title)
 void LogPanel::build_columns(const std::vector<std::string> &order)
 {
     list_->ClearColumns();
-    std::unordered_set<std::string> known(default_order_.begin(),
-                                          default_order_.end());
-    std::unordered_set<std::string> added;
-    for (const auto &t : order) {
-        if (!known.count(t) || added.count(t)) continue;
-        append_column(wxString::FromUTF8(t));
-        added.insert(t);
-    }
-    for (const auto &t : default_order_) {
-        if (added.count(t)) continue;
+    for (const auto &t :
+         dataview_merge_column_order(order, default_order_)) {
         append_column(wxString::FromUTF8(t));
     }
 }

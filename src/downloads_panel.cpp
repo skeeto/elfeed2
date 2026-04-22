@@ -13,8 +13,14 @@ class DownloadsPanelModel : public wxDataViewVirtualListModel {
 public:
     DownloadsPanelModel(DownloadsPanel *owner) : owner_(owner) {}
 
-    unsigned int GetColumnCount() const override { return 4; }
-    wxString GetColumnType(unsigned int) const override { return "string"; }
+    unsigned int GetColumnCount() const override { return 5; }
+
+    // Progress column is numeric (0-100) so wxDataViewProgressRenderer
+    // can draw a native bar; everything else stays string.
+    wxString GetColumnType(unsigned int col) const override
+    {
+        return col == 0 ? wxString("long") : wxString("string");
+    }
 
     void GetValueByRow(wxVariant &value,
                        unsigned int row,
@@ -24,20 +30,29 @@ public:
         const DownloadsPanel::Row &r = owner_->snapshot_[row];
         switch (col) {
         case 0: {
-            wxString pct;
-            if (r.active)
-                pct = r.progress.empty() ? wxString("...")
-                                         : wxString::FromUTF8(r.progress);
-            else if (r.paused)
-                pct = "paused";
-            else
-                pct = "queued";
+            // 0-100 long for the progress renderer. Parse the leading
+            // number from the human progress string we already track
+            // ("73.4%") so we don't need a separate progress field.
+            long pct = 0;
+            if (r.active && !r.progress.empty()) {
+                try { pct = (long)std::stod(r.progress); }
+                catch (...) {}
+            }
             value = pct;
             return;
         }
-        case 1: value = wxString::FromUTF8(r.total); return;
-        case 2: value = wxString::FromUTF8(r.name);  return;
-        case 3:
+        case 1: {
+            // Status — what the % column used to show as words.
+            wxString s;
+            if (r.active)      s = wxT("downloading");
+            else if (r.paused) s = wxT("paused");
+            else               s = wxT("queued");
+            value = s;
+            return;
+        }
+        case 2: value = wxString::FromUTF8(r.total); return;
+        case 3: value = wxString::FromUTF8(r.name);  return;
+        case 4:
             value = r.failures > 0 ? wxString::Format("%d", r.failures)
                                    : wxString();
             return;
@@ -82,7 +97,7 @@ DownloadsPanel::DownloadsPanel(wxWindow *parent, Elfeed *app)
     model_ = new DownloadsPanelModel(this);
     list_->AssociateModel(model_.get());
 
-    default_order_ = {"%", "Size", "Name", "Fails"};
+    default_order_ = {"Progress", "Status", "Size", "Name", "Fails"};
     std::string saved_cols = db_load_ui_state(app_, "cols.downloads");
     build_columns(dataview_parse_column_order(saved_cols));
     dataview_apply_columns(list_, saved_cols);
@@ -143,21 +158,36 @@ void DownloadsPanel::apply_sort()
         snapshot_.begin(), snapshot_.end(),
         [col = s.col, asc = s.ascending](const Row &a, const Row &b) {
             int c = 0;
+            // Status string for sort col 1 — must match what the
+            // model's GetValueByRow returns so the displayed order
+            // matches what users see.
+            auto status = [](const Row &r) {
+                if (r.active) return std::string("downloading");
+                if (r.paused) return std::string("paused");
+                return std::string("queued");
+            };
             switch (col) {
-            case 0:
-                c = (int)(parse_leading_number(a.progress) -
-                          parse_leading_number(b.progress) > 0) -
-                    (int)(parse_leading_number(a.progress) -
-                          parse_leading_number(b.progress) < 0);
+            case 0: {  // Progress (numeric)
+                double na = parse_leading_number(a.progress);
+                double nb = parse_leading_number(b.progress);
+                if (na != nb) c = na < nb ? -1 : 1;
                 break;
-            case 1: {
+            }
+            case 1:    // Status
+                c = ci_cmp_dl(status(a), status(b));
+                break;
+            case 2: {  // Size (numeric, leading digits)
                 double na = parse_leading_number(a.total);
                 double nb = parse_leading_number(b.total);
                 if (na != nb) c = na < nb ? -1 : 1;
                 break;
             }
-            case 2: c = ci_cmp_dl(a.name, b.name); break;
-            case 3: c = a.failures - b.failures;  break;
+            case 3:    // Name
+                c = ci_cmp_dl(a.name, b.name);
+                break;
+            case 4:    // Fails
+                c = a.failures - b.failures;
+                break;
             }
             return asc ? c < 0 : c > 0;
         });
@@ -362,17 +392,29 @@ void DownloadsPanel::append_column(const wxString &title)
     const int flags = wxDATAVIEW_COL_RESIZABLE |
                       wxDATAVIEW_COL_REORDERABLE |
                       wxDATAVIEW_COL_SORTABLE;
-    if (title == "%") {
-        list_->AppendTextColumn("%",     0, wxDATAVIEW_CELL_INERT,
-                                FromDIP(80),  wxALIGN_LEFT, flags);
+    if (title == "Progress") {
+        // Native progress bar via wxDataViewProgressRenderer.
+        // Reads a long 0-100 from model column 0; the model returns
+        // 0 for paused/queued rows so the bar stays empty until
+        // the download is actually running. The Status column
+        // (next over) carries the words for those states.
+        list_->AppendColumn(new wxDataViewColumn(
+            "Progress",
+            new wxDataViewProgressRenderer("", "long",
+                                           wxDATAVIEW_CELL_INERT,
+                                           wxALIGN_LEFT),
+            0, FromDIP(120), wxALIGN_LEFT, flags));
+    } else if (title == "Status") {
+        list_->AppendTextColumn("Status", 1, wxDATAVIEW_CELL_INERT,
+                                FromDIP(90),  wxALIGN_LEFT, flags);
     } else if (title == "Size") {
-        list_->AppendTextColumn("Size",  1, wxDATAVIEW_CELL_INERT,
+        list_->AppendTextColumn("Size",   2, wxDATAVIEW_CELL_INERT,
                                 FromDIP(80),  wxALIGN_LEFT, flags);
     } else if (title == "Name") {
-        list_->AppendTextColumn("Name",  2, wxDATAVIEW_CELL_INERT,
-                                FromDIP(380), wxALIGN_LEFT, flags);
+        list_->AppendTextColumn("Name",   3, wxDATAVIEW_CELL_INERT,
+                                FromDIP(360), wxALIGN_LEFT, flags);
     } else if (title == "Fails") {
-        list_->AppendTextColumn("Fails", 3, wxDATAVIEW_CELL_INERT,
+        list_->AppendTextColumn("Fails",  4, wxDATAVIEW_CELL_INERT,
                                 FromDIP(50),  wxALIGN_LEFT, flags);
     }
 }
@@ -380,16 +422,8 @@ void DownloadsPanel::append_column(const wxString &title)
 void DownloadsPanel::build_columns(const std::vector<std::string> &order)
 {
     list_->ClearColumns();
-    std::unordered_set<std::string> known(default_order_.begin(),
-                                          default_order_.end());
-    std::unordered_set<std::string> added;
-    for (const auto &t : order) {
-        if (!known.count(t) || added.count(t)) continue;
-        append_column(wxString::FromUTF8(t));
-        added.insert(t);
-    }
-    for (const auto &t : default_order_) {
-        if (added.count(t)) continue;
+    for (const auto &t :
+         dataview_merge_column_order(order, default_order_)) {
         append_column(wxString::FromUTF8(t));
     }
 }

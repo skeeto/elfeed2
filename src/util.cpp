@@ -8,10 +8,12 @@
 #include <wx/stdpaths.h>
 #include <wx/utils.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <unordered_map>
+#include <unordered_set>
 
 // Ensure wxStandardPaths uses XDG layout on Linux/BSD; on macOS and
 // Windows this is a no-op.
@@ -381,6 +383,44 @@ dataview_parse_column_order(const std::string &saved)
         titles.push_back(item.substr(0, eq));
     }
     return titles;
+}
+
+std::vector<std::string>
+dataview_merge_column_order(const std::vector<std::string> &saved,
+                            const std::vector<std::string> &default_order)
+{
+    // Step 1: keep saved titles still recognized by the panel.
+    std::unordered_set<std::string> known(default_order.begin(),
+                                          default_order.end());
+    std::vector<std::string> out;
+    std::unordered_set<std::string> in_out;
+    for (const auto &t : saved) {
+        if (known.count(t) && !in_out.count(t)) {
+            out.push_back(t);
+            in_out.insert(t);
+        }
+    }
+    // Step 2: insert any default titles missing from saved at the
+    // position right after the nearest preceding default-order
+    // title that's already in `out`. Walking default_order in
+    // forward order means later columns insert relative to the
+    // already-positioned earlier ones.
+    for (size_t i = 0; i < default_order.size(); i++) {
+        const std::string &t = default_order[i];
+        if (in_out.count(t)) continue;
+        size_t insert_pos = 0;
+        for (size_t j = i; j > 0; j--) {
+            const std::string &prev = default_order[j - 1];
+            auto it = std::find(out.begin(), out.end(), prev);
+            if (it != out.end()) {
+                insert_pos = (size_t)(it - out.begin()) + 1;
+                break;
+            }
+        }
+        out.insert(out.begin() + insert_pos, t);
+        in_out.insert(t);
+    }
+    return out;
 }
 
 void dataview_apply_columns(wxDataViewCtrl *ctrl, const std::string &saved)
