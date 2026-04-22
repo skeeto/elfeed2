@@ -113,11 +113,15 @@ static wxColour jet_at(double t)
     return jet_stops[n - 1].c;
 }
 
-// Continuous color for a given (count, max_c). Empty cells track
-// the theme background (faint tint) so the grid structure reads
-// on quiet days; non-empty cells map their log-compressed t
-// through the jet ramp.
-static wxColour colour_for_count(wxColour bg, int count, int max_c)
+// Continuous color for a given (count, min_c, max_c). Empty cells
+// track the theme background (faint tint); non-empty cells map
+// their log-compressed position within the [min_c, max_c] range
+// through the jet ramp. Normalizing against the actual range of
+// observed counts (rather than 0-to-max) guarantees the full ramp
+// is always used — the quietest nonzero day lands at the cool end,
+// the busiest at the warm end, even when everything is clustered.
+static wxColour colour_for_count(wxColour bg,
+                                 int count, int min_c, int max_c)
 {
     double luma = (0.2126 * bg.Red() +
                    0.7152 * bg.Green() +
@@ -125,19 +129,23 @@ static wxColour colour_for_count(wxColour bg, int count, int max_c)
     bool dark = luma < 0.5;
     wxColour empty_c = dark ? wxColour(22, 27, 34)
                             : wxColour(235, 237, 240);
+    constexpr size_t last = sizeof(jet_stops) /
+                            sizeof(jet_stops[0]) - 1;
 
     if (count <= 0) return empty_c;
-    if (max_c <= 1) return jet_stops[sizeof(jet_stops) /
-                                     sizeof(jet_stops[0]) - 1].c;
+    if (max_c <= min_c) return jet_stops[last].c;  // one-value case
 
-    double t = std::log(1.0 + (double)count) /
-               std::log(1.0 + (double)max_c);
+    double log_min = std::log(1.0 + (double)min_c);
+    double log_max = std::log(1.0 + (double)max_c);
+    double log_c   = std::log(1.0 + (double)count);
+    double t = (log_c - log_min) / (log_max - log_min);
     return jet_at(t);
 }
 
 void ActivityPanel::refresh()
 {
     counts_.clear();
+    min_count_ = 0;
     max_count_ = 0;
 
     // Pull *every* entry's date, unfiltered — the heatmap shows
@@ -154,8 +162,11 @@ void ActivityPanel::refresh()
         if (d <= 0) continue;
         counts_[day_start_of(d)]++;
     }
-    for (auto &[_, c] : counts_)
+    for (auto &[_, c] : counts_) {
+        if (c <= 0) continue;
         max_count_ = std::max(max_count_, c);
+        if (min_count_ == 0 || c < min_count_) min_count_ = c;
+    }
 
     Refresh();
 }
@@ -255,7 +266,8 @@ void ActivityPanel::on_paint(wxPaintEvent &)
         if (d > today_start) continue;  // future cells stay blank
         auto it = counts_.find(d);
         int count = it != counts_.end() ? it->second : 0;
-        dc.SetBrush(colour_for_count(bg, count, max_count_));
+        dc.SetBrush(colour_for_count(bg, count,
+                                     min_count_, max_count_));
         dc.DrawRectangle(
             g.grid_x + col * (g.cell + g.gap),
             g.grid_y + row * (g.cell + g.gap),

@@ -37,10 +37,12 @@ private:
     // Local-midnight epoch → entry count. Only days with ≥1 entry
     // are present; the renderer synthesizes empty cells.
     std::map<int64_t, int> counts_;
-    // Roof for the color ramp — the busiest day's count. Used as
-    // scale_max for level_for, so a single spike does push the
-    // rest of the distribution into the lower levels: that shape
-    // is the interesting signal, not something to normalize away.
+    // Range of nonzero counts. The color ramp maps
+    // log(1+min_count_) → log(1+max_count_) across its full
+    // hue sweep, so the quietest nonzero day always lands at the
+    // cool end and the busiest at the warm end regardless of
+    // absolute count magnitudes.
+    int min_count_ = 0;
     int max_count_ = 0;
 };
 
