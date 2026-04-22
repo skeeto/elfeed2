@@ -565,9 +565,12 @@ void db_query_entries(Elfeed *app, const Filter &filter,
     std::vector<double> bind_doubles;
 
     // FTS MATCH goes first in the WHERE so the planner uses the
-    // full-text index as the driving table.
+    // full-text index as the driving table. Reference the alias
+    // we set in the JOIN (`fts`), not the bare table name: with
+    // the alias in scope, `entry_fts MATCH ?` can fail SQL name
+    // resolution depending on the SQLite version.
     if (use_fts) {
-        where.push_back("entry_fts MATCH ?");
+        where.push_back("fts MATCH ?");
     }
     if (filter.after > 0) {
         double cutoff = (double)time(nullptr) - filter.after;
@@ -617,8 +620,15 @@ void db_query_entries(Elfeed *app, const Filter &filter,
         filter.limit > 0 ? filter.limit : default_limit;
 
     sqlite3_stmt *stmt;
-    if (sqlite3_prepare_v2(app->db, sql.c_str(), -1, &stmt, nullptr) != SQLITE_OK)
+    if (sqlite3_prepare_v2(app->db, sql.c_str(), -1, &stmt, nullptr)
+        != SQLITE_OK) {
+        // Log and bail instead of silently returning an empty list.
+        // An FTS syntax oops used to look exactly like "the filter
+        // matched zero entries," which was invisible to debug.
+        elfeed_log(app, LOG_ERROR, "db_query_entries prepare: %s",
+                   sqlite3_errmsg(app->db));
         return;
+    }
 
     // Bind order matches WHERE order: FTS MATCH (if any), then
     // date bounds. Tag filters are interpolated into SQL text
