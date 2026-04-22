@@ -1,6 +1,10 @@
 cmake_minimum_required(VERSION 3.25)
 project(elfeed2 VERSION 0.1.0 LANGUAGES C CXX)
 
+# Local CMake modules (FetchContentBundled, future helpers).
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+include(FetchContentBundled)
+
 # Route compiler invocations through ccache when available. Speeds up
 # clean rebuilds (including wxWidgets and friends, which are a lot of
 # C++ source). Turn off with -DELFEED2_USE_CCACHE=OFF.
@@ -31,13 +35,7 @@ set(FETCHCONTENT_QUIET ON)
 
 # --- wxWidgets ---
 
-if(IS_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/deps/wxWidgets")
-  set(FETCHCONTENT_SOURCE_DIR_WXWIDGETS
-      "${CMAKE_CURRENT_SOURCE_DIR}/deps/wxWidgets")
-  message(STATUS "wxWidgets: bundled")
-else()
-  message(STATUS "wxWidgets: downloaded")
-endif()
+fetch_content_bundled(wxWidgets wxWidgets)
 
 set(wxBUILD_SHARED  OFF CACHE BOOL "" FORCE)
 set(wxBUILD_TESTS   OFF CACHE BOOL "" FORCE)
@@ -68,12 +66,7 @@ endif()
 
 # --- SQLite3 (amalgamation) ---
 
-if(IS_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/deps/sqlite")
-  set(FETCHCONTENT_SOURCE_DIR_SQLITE "${CMAKE_CURRENT_SOURCE_DIR}/deps/sqlite")
-  message(STATUS "SQLite: bundled")
-else()
-  message(STATUS "SQLite: downloaded")
-endif()
+fetch_content_bundled(sqlite sqlite)
 
 FetchContent_Declare(
   sqlite
@@ -96,12 +89,7 @@ target_compile_definitions(sqlite3 PRIVATE
 
 # --- pugixml ---
 
-if(IS_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/deps/pugixml")
-  set(FETCHCONTENT_SOURCE_DIR_PUGIXML "${CMAKE_CURRENT_SOURCE_DIR}/deps/pugixml")
-  message(STATUS "pugixml: bundled")
-else()
-  message(STATUS "pugixml: downloaded")
-endif()
+fetch_content_bundled(pugixml pugixml)
 
 FetchContent_Declare(
   pugixml
@@ -114,13 +102,7 @@ FetchContent_MakeAvailable(pugixml)
 
 if(NOT WIN32)
   # mbedTLS
-  if(IS_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls")
-    set(FETCHCONTENT_SOURCE_DIR_MBEDTLS
-        "${CMAKE_CURRENT_SOURCE_DIR}/deps/mbedtls")
-    message(STATUS "mbedTLS: bundled")
-  else()
-    message(STATUS "mbedTLS: downloaded")
-  endif()
+  fetch_content_bundled(mbedtls mbedtls)
 
   set(ENABLE_PROGRAMS OFF CACHE BOOL "" FORCE)
   set(ENABLE_TESTING  OFF CACHE BOOL "" FORCE)
@@ -134,13 +116,7 @@ if(NOT WIN32)
   FetchContent_MakeAvailable(mbedtls)
 
   # cpp-httplib (header-only; only need its include path)
-  if(IS_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/deps/cpp-httplib")
-    set(FETCHCONTENT_SOURCE_DIR_CPP-HTTPLIB
-        "${CMAKE_CURRENT_SOURCE_DIR}/deps/cpp-httplib")
-    message(STATUS "cpp-httplib: bundled")
-  else()
-    message(STATUS "cpp-httplib: downloaded")
-  endif()
+  fetch_content_bundled(cpp-httplib cpp-httplib)
 
   FetchContent_Declare(
     cpp-httplib

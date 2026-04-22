@@ -22,6 +22,16 @@ fetched automatically.
     $ cmake -B build
     $ cmake --build build
 
+To cross-compile a self-contained Windows binary from Linux/macOS using
+mingw-w64 (apt: `gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64`, brew:
+`mingw-w64`):
+
+    $ cmake -B build-win -DCMAKE_TOOLCHAIN_FILE=cmake/Toolchain-Mingw64.cmake
+    $ cmake --build build-win
+
+The resulting `elfeed2.exe` statically links libstdc++, libgcc, and
+winpthread, so it doesn't drag any mingw runtime DLLs along with it.
+
 ## Configuration
 
 The configuration file is at `$XDG_CONFIG_HOME/elfeed2/config` (typically
