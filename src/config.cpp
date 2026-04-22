@@ -146,9 +146,15 @@ int64_t parse_hex_color(const std::string &s)
 
 void config_load(Elfeed *app)
 {
-    std::string dir = user_config_dir();
-    make_directory(dir);
-    app->config_path = dir + "/config";
+    // Honor a pre-set config_path (--config CLI option set it).
+    // Otherwise use the platform default and ensure the dir
+    // exists so the user can edit-and-save without a missing
+    // parent stopping them.
+    if (app->config_path.empty()) {
+        std::string dir = user_config_dir();
+        make_directory(dir);
+        app->config_path = dir + "/config";
+    }
 
     wxTextFile tf;
     if (!tf.Open(wxString::FromUTF8(app->config_path))) return;

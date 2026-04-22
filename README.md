@@ -44,6 +44,20 @@ mingw-w64 (apt: `gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64`, brew:
 The resulting `elfeed2.exe` statically links libstdc++, libgcc, and
 winpthread, so it doesn't drag any mingw runtime DLLs along with it.
 
+## Command line
+
+    elfeed2 [-h] [-d|--db PATH] [-c|--config PATH]
+
+By default, the database lives at the platform's user data directory
+(`~/Library/Application Support/elfeed2/elfeed.db` on macOS,
+`%APPDATA%\elfeed2\elfeed.db` on Windows, `$XDG_DATA_HOME/elfeed2/elfeed.db`
+on Linux), and the config at `$XDG_CONFIG_HOME/elfeed2/config`.
+
+Override either with `--db` and `--config`. Useful for running a test
+or scratch instance alongside your real one — the single-instance
+guard is per-DB, so multiple instances against different databases
+don't conflict.
+
 ## Configuration
 
 The configuration file is at `$XDG_CONFIG_HOME/elfeed2/config` (typically

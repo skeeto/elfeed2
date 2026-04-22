@@ -3,11 +3,16 @@
 #include "events.hpp"
 #include "main_frame.hpp"
 
+#include <wx/cmdline.h>
 #include <wx/event.h>
 #include <wx/filesys.h>
 #include <wx/image.h>
 #include <wx/msgdlg.h>
 #include <wx/utils.h>
+
+#include "util.hpp"
+
+#include <functional>
 
 #include <cstdarg>
 #include <cstdio>
@@ -181,6 +186,43 @@ bool ElfeedApp::OnInit()
 
     SetAppName("elfeed2");
 
+    // Command-line options. --db / --config let users (and the
+    // mock-feed test rig) run against an isolated database +
+    // config without disturbing the production install.
+    {
+        wxCmdLineParser parser(argc, argv);
+        parser.AddSwitch("h", "help",
+            "Show this help message and exit",
+            wxCMD_LINE_OPTION_HELP);
+        parser.AddOption("d", "db",
+            "Use the named SQLite database instead of the default",
+            wxCMD_LINE_VAL_STRING);
+        parser.AddOption("c", "config",
+            "Use the named config file instead of the default",
+            wxCMD_LINE_VAL_STRING);
+        // Don't choke on macOS's auto-injected -psn_ process serial
+        // number when the .app launches from Finder.
+        parser.SetSwitchChars("-");
+        int rc = parser.Parse();
+        if (rc != 0) return false;  // -1 = help shown, >0 = error
+        wxString val;
+        if (parser.Found("db",     &val))
+            state_.db_path     = val.utf8_string();
+        if (parser.Found("config", &val))
+            state_.config_path = val.utf8_string();
+    }
+
+    // Resolve the DB path now (defaulting if --db wasn't given) so
+    // the single-instance check below can scope its lock per-DB:
+    // multiple instances against different DBs aren't a conflict
+    // and shouldn't block each other. The check happens before
+    // elfeed_init so we don't open the DB twice across processes.
+    if (state_.db_path.empty()) {
+        std::string dir = user_data_dir();
+        make_directory(dir);
+        state_.db_path = dir + "/elfeed.db";
+    }
+
     // Install decoders for every image format wxWidgets can handle
     // (PNG, JPEG, GIF, WebP, TIFF, BMP, PCX, etc). Without this call
     // wxImage only knows BMP, so wxHtmlWindow pops up "Unknown image
@@ -197,18 +239,19 @@ bool ElfeedApp::OnInit()
     wxFileSystem::AddHandler(new DataURIHandler);
 
     // Single-instance guard. Two copies running against the same
-    // SQLite database would race on writes and the AUI/geometry state
-    // would clobber each other at close time. Per-user scope via
-    // wxGetUserId so different users on the same machine aren't
-    // locked out. On Windows this is a named mutex; on POSIX it's a
-    // lock file under the user's runtime/temp dir. On macOS the
-    // bundle already single-instances when launched from Dock/Finder,
-    // but running the binary directly from a terminal bypasses that
-    // — this covers it.
+    // SQLite database would race on writes and the AUI/geometry
+    // state would clobber each other at close time. Scope the lock
+    // per (user, DB) so a --db override (e.g. a test instance
+    // against /tmp/test.db) doesn't conflict with the production
+    // instance against the default DB.
+    auto db_token = std::hash<std::string>{}(state_.db_path);
     instance_checker_ = std::make_unique<wxSingleInstanceChecker>(
-        "elfeed2-" + wxGetUserId());
+        wxString::Format("elfeed2-%s-%lx",
+                         wxGetUserId(),
+                         (unsigned long)db_token));
     if (instance_checker_->IsAnotherRunning()) {
-        wxMessageBox("Another Elfeed2 instance is already running.",
+        wxMessageBox("Another Elfeed2 instance is already running "
+                     "against this database.",
                      "Elfeed2", wxOK | wxICON_INFORMATION);
         instance_checker_.reset();
         return false;

@@ -1,6 +1,8 @@
 #include "elfeed.hpp"
 #include "util.hpp"
 
+#include <wx/filename.h>
+
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
@@ -112,9 +114,19 @@ CREATE INDEX IF NOT EXISTS idx_log_entry_time
 
 void db_open(Elfeed *app)
 {
-    std::string dir = user_data_dir();
-    make_directory(dir);
-    app->db_path = dir + "/elfeed.db";
+    // Honor a pre-set db_path (--db CLI option set it in OnInit).
+    // Otherwise compute the default under user_data_dir/elfeed.db.
+    if (app->db_path.empty()) {
+        std::string dir = user_data_dir();
+        make_directory(dir);
+        app->db_path = dir + "/elfeed.db";
+    } else {
+        // For an explicit override, ensure the parent dir exists
+        // so sqlite3_open can create the file there.
+        wxFileName fn(wxString::FromUTF8(app->db_path));
+        if (fn.HasName() && !fn.GetPath().empty())
+            make_directory(fn.GetPath().utf8_string());
+    }
 
     int rc = sqlite3_open(app->db_path.c_str(), &app->db);
     if (rc != SQLITE_OK) {
