@@ -58,6 +58,20 @@ or scratch instance alongside your real one — the single-instance
 guard is per-DB, so multiple instances against different databases
 don't conflict.
 
+For stress testing the fetch + log + download paths without bothering
+real servers, `tests/fakefeeds.py` serves N synthetic Atom feeds on
+localhost with optional latency and failure injection:
+
+    # Terminal 1: serve 100 fake feeds with realistic latency
+    python3 tests/fakefeeds.py --feeds 100 --latency-max 2.0 --fail-rate 0.05
+
+    # Terminal 2: generate a matching config and launch a test instance
+    python3 tests/fakefeeds.py --feeds 100 --print-config > /tmp/test.conf
+    elfeed2 --db /tmp/test.db --config /tmp/test.conf
+
+Press F5 inside the test instance to trigger a parallel fetch and
+watch the Log + Downloads panels under load.
+
 ## Configuration
 
 The configuration file is at `$XDG_CONFIG_HOME/elfeed2/config` (typically
