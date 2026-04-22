@@ -32,8 +32,24 @@ if(ELFEED2_USE_CCACHE)
   find_program(CCACHE_PROGRAM ccache)
   if(CCACHE_PROGRAM)
     message(STATUS "ccache: ${CCACHE_PROGRAM}")
-    set(CMAKE_C_COMPILER_LAUNCHER   "${CCACHE_PROGRAM}")
-    set(CMAKE_CXX_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
+    # wxWidgets uses precompiled headers per-target (~600 of the
+    # ~800 wx compile commands carry `-include cmake_pch.hxx`),
+    # and ccache + GCC + PCH is brittle — every fresh build's PCH
+    # has new internal timestamps, so without `pch_defines`
+    # ccache misses on every TU that includes the PCH.
+    # `time_macros` covers the same hazard for any source that
+    # bakes __DATE__/__TIME__ into the output.
+    # Wrapping via `cmake -E env` is portable; the env var is
+    # then set in each ccache subprocess regardless of how the
+    # build is invoked.
+    set(CMAKE_C_COMPILER_LAUNCHER
+        "${CMAKE_COMMAND}" "-E" "env"
+        "CCACHE_SLOPPINESS=pch_defines,time_macros,include_file_mtime,include_file_ctime"
+        "${CCACHE_PROGRAM}")
+    set(CMAKE_CXX_COMPILER_LAUNCHER
+        "${CMAKE_COMMAND}" "-E" "env"
+        "CCACHE_SLOPPINESS=pch_defines,time_macros,include_file_mtime,include_file_ctime"
+        "${CCACHE_PROGRAM}")
   else()
     message(STATUS "ccache: not found")
   endif()

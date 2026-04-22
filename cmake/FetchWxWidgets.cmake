@@ -64,6 +64,16 @@ set(wxUSE_HELP                   OFF CACHE BOOL "" FORCE)  # help system
 set(wxUSE_WXHTML_HELP            OFF CACHE BOOL "" FORCE)  # html-based help
 set(wxUSE_DEBUGREPORT            OFF CACHE BOOL "" FORCE)  # crash reports
 
+# Disable wx's per-target precompiled headers. PCH speeds up the
+# first wx build by ~30%, but the .pch binary embeds a timestamp
+# nonce that ccache treats as an extra-file mismatch — so every
+# fresh build's wx compiles miss the cache regardless of
+# pch_defines/include_file_mtime sloppiness. Net wins go to
+# ccache for our use pattern (iterate, occasionally rm -rf
+# build): cold first build is a bit slower without PCH, every
+# subsequent clean build is much faster with cached objects.
+set(wxBUILD_PRECOMP              OFF CACHE BOOL "" FORCE)
+
 # The release tarball includes all bundled third-party sources inline
 # (zlib, libpng, libjpeg, libtiff, expat, …), so unlike the git repo
 # there are no submodules to recurse.
