@@ -4,19 +4,23 @@
 #include <wx/panel.h>
 
 #include <cstdint>
-#include <vector>
+#include <map>
 
 #include "elfeed.hpp"
 
-// Bottom-dockable AUI pane that renders entry frequency over time as
-// a bar chart, weekly bins. Driven by app->entries (the same entries
-// the entry list shows, so it respects whatever filter is active).
+// Bottom-dockable AUI pane rendering entry cadence as a
+// GitHub-contributions-style heatmap: one 53-column × 7-row grid
+// per calendar year, one cell per day, color intensity scaled
+// from the entry count. Years stack top (most recent, partial
+// through today) to bottom (oldest). Driven by app->entries, so
+// the view respects whatever filter is active.
 class ActivityPanel : public wxPanel {
 public:
     ActivityPanel(wxWindow *parent, Elfeed *app);
 
-    // Re-bin from app->entries and repaint. Cheap (linear in
-    // entry count); MainFrame calls it after every requery.
+    // Re-bin from app->entries and repaint. Linear in entry count.
+    // Called after every requery and on wake ticks while the pane
+    // is visible.
     void refresh();
 
 private:
@@ -24,19 +28,15 @@ private:
     void on_motion(wxMouseEvent &);
     void on_size(wxSizeEvent &);
 
-    // Map a unix epoch to the unix epoch of the Monday 00:00 local
-    // that starts the containing week. Local TZ so week boundaries
-    // match how the user perceives reading cadence.
-    static int64_t week_start_of(double epoch);
+    // Unix epoch of local midnight for the given timestamp. Local
+    // TZ so cells align to how the user perceives days.
+    static int64_t day_start_of(double epoch);
 
     Elfeed *app_;
 
-    // One bin per week with at least one entry; sorted by week_start.
-    struct Bin {
-        int64_t week_start;
-        int     count;
-    };
-    std::vector<Bin> bins_;
+    // Local-midnight epoch → entry count. Only days with ≥1 entry
+    // are present; the renderer synthesizes empty cells.
+    std::map<int64_t, int> counts_;
     int max_count_ = 0;
 };
 
