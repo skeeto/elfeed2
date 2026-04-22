@@ -322,12 +322,19 @@ bool fetch_process_results(Elfeed *app);
 
 // Logging.
 // `gnu_printf` (rather than `printf`) so the format-string check
-// uses C99/GNU rules across all targets. On mingw, the `printf`
-// archetype maps to `ms_printf`, which doesn't recognise %zu / %ll
-// and warns on every elfeed_log("%zu …", size_t). gnu_printf is
-// the same as printf on GCC/Clang elsewhere.
+// uses C99/GNU rules. On mingw the `printf` archetype maps to
+// `ms_printf`, which doesn't recognise %zu / %ll and warns on
+// every elfeed_log("%zu …", size_t). On GCC `gnu_printf` is the
+// right archetype; Apple Clang doesn't recognise it but its plain
+// `printf` archetype already follows C99 rules, so guard the
+// switch behind the GCC version macro.
+#if defined(__GNUC__) && !defined(__clang__)
+#  define ELFEED_LOG_FMT format(gnu_printf, 3, 4)
+#else
+#  define ELFEED_LOG_FMT format(printf, 3, 4)
+#endif
 void elfeed_log(Elfeed *app, LogKind kind, const char *fmt, ...)
-    __attribute__((format(gnu_printf, 3, 4)));
+    __attribute__((ELFEED_LOG_FMT));
 
 // Post a "UI needs update" event to the main frame. Worker-thread safe.
 // Implemented in app.cpp where wxWidgets headers are in scope.

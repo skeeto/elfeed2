@@ -5,14 +5,21 @@
 
 #include <wx/cmdline.h>
 #include <wx/event.h>
+#include <wx/file.h>
+#include <wx/filename.h>
 #include <wx/filesys.h>
 #include <wx/image.h>
+#include <wx/log.h>
 #include <wx/msgdlg.h>
 #include <wx/utils.h>
 
 #include "util.hpp"
 
 #include <functional>
+
+// Embedded asset blobs (see CMakeLists + cmake/EmbedFile.cmake).
+extern const char embedded_sample_config[];
+extern const char embedded_welcome_html[];
 
 #include <cstdarg>
 #include <cstdio>
@@ -56,7 +63,32 @@ void app_wake_ui(Elfeed *app)
 
 void elfeed_init(Elfeed *app)
 {
-    config_load(app);
+    // First-launch: write the embedded sample config if the
+    // default-path config doesn't exist yet. Skip when --config
+    // was passed (user explicitly chose a path; respect it as-is
+    // even if it's missing). Without this seed, wxTextFile::Open
+    // pops a "file not found" dialog from wxLog on every fresh
+    // launch — and the user has no example to learn from.
+    if (app->config_path.empty()) {
+        std::string dir = user_config_dir();
+        make_directory(dir);
+        app->config_path = dir + "/config";
+        if (!wxFileName::FileExists(
+                wxString::FromUTF8(app->config_path))) {
+            wxFile f(wxString::FromUTF8(app->config_path),
+                     wxFile::write);
+            if (f.IsOpened())
+                f.Write(embedded_sample_config);
+        }
+    }
+
+    {
+        // Suppress wx's logger around config_load: a still-missing
+        // file (e.g. user passed --config to a path they haven't
+        // created yet) shouldn't trigger a popup.
+        wxLogNull no_log;
+        config_load(app);
+    }
     db_open(app);
     db_load_feeds(app);
 
@@ -105,6 +137,35 @@ void elfeed_init(Elfeed *app)
         app->log_db_committed = app->log.size();
     }
     db_log_purge(app, cutoff);
+
+    // First-launch welcome entry: a "virtual" entry from a
+    // synthetic elfeed2:// feed, dropped into the entry table so
+    // it shows up in the listing like any other unread item. Use
+    // a stable namespace+id and a ui_state guard so a user who
+    // marks it read and then somehow loses ui_state doesn't have
+    // it pop back the next launch. Inserts a feed row first so
+    // the entry's feed_url FK is satisfied.
+    if (db_load_ui_state(app, "welcome.installed") != "1") {
+        Feed wf;
+        wf.url   = "elfeed2://welcome";
+        wf.title = "Elfeed2";
+        db_update_feed(app, wf);
+
+        Entry e;
+        e.namespace_   = "elfeed2";
+        e.id           = "welcome-v1";
+        e.feed_url     = wf.url;
+        e.title        = "Welcome to Elfeed2";
+        e.link         = "https://github.com/skeeto/elfeed2";
+        e.date         = now;
+        e.content      = embedded_welcome_html;
+        e.content_type = "html";
+        e.tags         = {"unread", "elfeed2"};
+        std::vector<Entry> batch{ std::move(e) };
+        db_add_entries(app, batch);
+
+        db_save_ui_state(app, "welcome.installed", "1");
+    }
 
     app->current_filter = filter_parse(app->default_filter);
 }

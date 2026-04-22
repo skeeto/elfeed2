@@ -1,0 +1,91 @@
+# Elfeed2 configuration — seeded on first launch.
+#
+# Format: ssh_config-style. `keyword value`, blank lines are
+# cosmetic, comments start with `#` at the start of a line OR
+# preceded by whitespace AND followed by whitespace (so #-prefixed
+# values like hex colors aren't eaten as comments).
+#
+# Edit anything below, then File → Reload Config (Ctrl+Shift+R).
+
+# ---- Global settings ----------------------------------------------
+
+# Where downloaded enclosures land. ~ expands to your home dir.
+download-dir         ~/Downloads
+
+# Program used for video downloads (entries with no enclosure but
+# a "video" tag). The default expects yt-dlp on PATH.
+ytdlp-program        yt-dlp
+
+# Pass extra args to yt-dlp. Repeatable; one --arg per line.
+ytdlp-arg            --no-warnings
+ytdlp-arg            --embed-metadata
+
+# Initial filter applied to the entry list at startup. This is also
+# what Reset Layout falls back to. Filter syntax:
+#   +tag    must have tag         -tag    must NOT have tag
+#   @age    older than            (e.g. @6-months-ago, @1-week)
+#   =text   feed URL contains     ~text   feed URL must not contain
+#   !text   title regex must NOT match    bare term: title regex
+#   #N      cap result count to N
+default-filter       @6-months-ago +unread
+
+# Number of feeds to fetch in parallel.
+max-connections      16
+
+# Per-feed network timeout in seconds.
+fetch-timeout        30
+
+# Give up on a download after N consecutive failures. The row
+# stays in the queue marked "failed"; right-click → Retry to
+# reset the counter.
+max-download-failures 5
+
+# How long to keep log entries in the database. Older entries
+# are purged on each launch.
+log-retention-days   90
+
+# ---- Filter presets (single-key shortcuts) -------------------------
+# `preset KEY FILTER` binds KEY to apply that filter when the entry
+# list has focus. The built-in keys (j/k/g/G/u/r/b/y/d/f/s//) take
+# precedence; everything else (letters, digits, punctuation) is
+# fair game. Shift turns "h" into "H", so you can bind both.
+
+preset h             @1-month +unread
+
+# ---- Per-tag colors -----------------------------------------------
+# `color TAG #RRGGBB` (or #RGB shorthand) tints entries whose tag
+# list includes TAG. First matching color wins, so order by
+# priority. Foreground only — sites with their own inline colors
+# may override.
+
+# color youtube       #ff99ff
+# color hn            #d08770
+
+# ---- Aliases (URL macros) -----------------------------------------
+# An `alias NAME TEMPLATE` directive defines a shortcut. Using the
+# alias name in place of a URL expands `{}` in the template with the
+# rest of the line.
+
+alias youtube        https://www.youtube.com/feeds/videos.xml?channel_id={}
+alias reddit         https://www.reddit.com/r/{}/.rss
+
+# ---- Feeds --------------------------------------------------------
+# Any line with `://` is a URL stanza head. Lines after it apply to
+# that feed until the next URL/alias line. Indentation is cosmetic.
+#
+#   `title TITLE`  overrides the feed's self-declared title
+#   `tag TAG ...`  applies one or more tags to every entry from
+#                  this feed (repeatable)
+#
+# A few examples to get you started; replace with your own feeds:
+
+https://nullprogram.com/feed/
+  title              null program
+  tag                blog programming
+
+# youtube UCq8ZAAsI89IoJ-fn1gYpO3g
+#   title            Kurzgesagt After Dark
+#   tag              youtube history
+
+# reddit C_Programming
+#   tag              programming

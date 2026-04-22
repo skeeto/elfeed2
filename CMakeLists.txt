@@ -4,6 +4,7 @@ project(elfeed2 VERSION 0.1.0 LANGUAGES C CXX)
 # Local CMake modules (helpers + per-dep Fetch<X>.cmake files).
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(FetchContentBundled)
+include(EmbedFile)
 
 # Where to obtain dependencies:
 #   FETCH (default) — pull pinned versions via FetchContent. Hermetic
@@ -135,6 +136,20 @@ set(elfeed_sources
   src/util.cpp
   src/elfeed_import.cpp
 )
+
+# Embed the seed config + welcome HTML straight from assets/ so
+# editing the .txt source rebuilds the .cpp at build time.
+elfeed2_embed_file(
+  "${CMAKE_CURRENT_SOURCE_DIR}/assets/sample-config"
+  "${CMAKE_CURRENT_BINARY_DIR}/embed_sample_config.cpp"
+  embedded_sample_config)
+elfeed2_embed_file(
+  "${CMAKE_CURRENT_SOURCE_DIR}/assets/welcome.html"
+  "${CMAKE_CURRENT_BINARY_DIR}/embed_welcome.cpp"
+  embedded_welcome_html)
+list(APPEND elfeed_sources
+  "${CMAKE_CURRENT_BINARY_DIR}/embed_sample_config.cpp"
+  "${CMAKE_CURRENT_BINARY_DIR}/embed_welcome.cpp")
 if(WIN32)
   # Configure the .rc from a template so PROJECT_VERSION (and its
   # MAJOR/MINOR/PATCH split) drives both the VERSIONINFO numeric
