@@ -184,7 +184,7 @@ Age units: `year`/`y`, `month`/`M`, `week`/`w`, `day`/`d`, `hour`/`h`,
 |-------------|------------------------------------------|
 | `j` / `k`   | Move cursor down / up                   |
 | `g` / `G`   | Jump to first / last entry               |
-| `Enter`     | Open entry detail view                   |
+| `Enter`     | Focus the preview pane (reader mode)     |
 | `b`         | Open entry link in browser               |
 | `y`         | Copy entry link to clipboard             |
 | `u`         | Mark unread (advances cursor)            |

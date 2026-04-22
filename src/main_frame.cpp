@@ -827,7 +827,13 @@ void MainFrame::on_list_selected(wxDataViewEvent &)
 
 void MainFrame::on_list_activated(wxDataViewEvent &)
 {
-    action_mark_read();
+    // wxEVT_DATAVIEW_ITEM_ACTIVATED fires on Enter or double-click.
+    // Both gestures mean "commit to reading this one": move keyboard
+    // focus into the preview pane so the reader-mode bindings
+    // (q/Escape, n/p, b/y/d/u) take over. The preview was already
+    // showing the entry as soon as selection landed on it, so this
+    // is strictly a focus transfer — no content change.
+    if (detail_) detail_->focus_body();
 }
 
 void MainFrame::on_list_context_menu(wxDataViewEvent &event)
