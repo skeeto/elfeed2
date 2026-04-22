@@ -137,6 +137,7 @@ Age units: `year`/`y`, `month`/`M`, `week`/`w`, `day`/`d`, `hour`/`h`,
 | `r`         | Mark read (advances cursor)              |
 | `R`         | Refresh filter                           |
 | `v`         | Toggle visual selection                  |
+| `Ctrl+A`    | Select all entries                       |
 | `s` / `/`   | Edit filter                              |
 | `f`         | Fetch all feeds                          |
 | `d`         | Download enclosure (via yt-dlp)          |

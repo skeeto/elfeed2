@@ -754,6 +754,15 @@ void MainFrame::on_list_key(wxKeyEvent &e)
 {
     int code = e.GetKeyCode();
     bool plain = !e.HasAnyModifiers();
+    // Ctrl+A / Cmd+A: select every entry. ControlDown maps to Cmd
+    // on macOS (the OS-native shortcut for Select All), while
+    // RawControlDown is the physical Ctrl key on every platform —
+    // bind both so cross-platform muscle memory works.
+    if (code == 'A' && (e.RawControlDown() || e.ControlDown()) &&
+        !e.AltDown()) {
+        list_->SelectAll();
+        return;
+    }
     switch (code) {
     case 'J': if (plain) { move_selection(+1); return; } break;
     case 'K': if (plain) { move_selection(-1); return; } break;
