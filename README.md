@@ -211,7 +211,6 @@ and then exits visual mode; `Escape` or `v` again also exits.
 | `Enter`     | Submit filter                            |
 | `Escape`    | Cancel and restore previous filter       |
 | `Backspace` | Delete character                         |
-| `Ctrl+Backspace` | Delete word                        |
 | `Ctrl+W`    | Delete word                              |
 
 ### Entry detail keys
