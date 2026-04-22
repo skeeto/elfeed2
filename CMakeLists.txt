@@ -73,10 +73,12 @@ endif()
 include(FetchSQLite)
 include(FetchPugixml)
 
-# mbedTLS + cpp-httplib aren't needed on Windows — http_win.cpp
-# uses WinHTTP and httplib.h is never included.
+# TLS + cpp-httplib aren't needed on Windows — http_win.cpp uses
+# WinHTTP and httplib.h is never included. FetchTLS picks the
+# right backend per DEPS mode (OpenSSL for LOCAL, mbedTLS for
+# FETCH) and exposes a `tls` interface target.
 if(NOT WIN32)
-  include(FetchMbedTLS)
+  include(FetchTLS)
   include(FetchCppHttplib)
 endif()
 
@@ -175,10 +177,10 @@ target_link_libraries(elfeed2 PRIVATE
 if(WIN32)
   target_link_libraries(elfeed2 PRIVATE winhttp)
 else()
-  target_link_libraries(elfeed2 PRIVATE
-    mbedtls mbedx509 mbedcrypto
-    cpp-httplib
-  )
+  # `tls` carries both the link libs (OpenSSL or mbedTLS depending
+  # on DEPS) AND the right CPPHTTPLIB_*_SUPPORT compile define on
+  # its INTERFACE properties — see cmake/FetchTLS.cmake.
+  target_link_libraries(elfeed2 PRIVATE tls cpp-httplib)
   if(APPLE)
     # Newer cpp-httplib versions (v0.43.1+ as packaged by Homebrew)
     # added native keychain CA enumeration that calls into Security
@@ -187,10 +189,6 @@ else()
     target_link_libraries(elfeed2 PRIVATE
       "-framework Security" "-framework CoreFoundation")
   endif()
-  # The MBEDTLS_SUPPORT define toggles TLS support inside the
-  # header at our compile site; doesn't affect cpp-httplib's own
-  # build (which is header-only as we use it).
-  target_compile_definitions(elfeed2 PRIVATE CPPHTTPLIB_MBEDTLS_SUPPORT)
 endif()
 
 target_compile_definitions(elfeed2 PRIVATE
