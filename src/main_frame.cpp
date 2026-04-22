@@ -136,6 +136,15 @@ MainFrame::MainFrame(Elfeed *app)
          log_drain_timer_.GetId());
     log_drain_timer_.Start(5 * 1000);
 
+    // One-shot debounce for filter-bar typing. on_filter_text starts
+    // it; when the user pauses for ~180 ms, this fires the actual
+    // requery. Enter/Escape/focus-out paths stop the timer and
+    // call commit_filter() directly for immediate feedback.
+    filter_debounce_.SetOwner(this);
+    Bind(wxEVT_TIMER,
+         [this](wxTimerEvent &) { commit_filter(); },
+         filter_debounce_.GetId());
+
     // Focus the entry list so vi-style keys work immediately.
     CallAfter([this] { list_->SetFocus(); });
 }
@@ -365,6 +374,13 @@ void MainFrame::bind_events()
     // Persist the current filter text when the user leaves the filter
     // control (blur), so it's remembered across runs.
     filter_->Bind(wxEVT_KILL_FOCUS, [this](wxFocusEvent &e) {
+        // Flush any debounced edit so leaving the control
+        // applies what the user just typed (rather than leaving
+        // the listing out of sync with the visible filter text).
+        if (filter_debounce_.IsRunning()) {
+            filter_debounce_.Stop();
+            commit_filter();
+        }
         db_save_ui_state(app_, "filter",
                          filter_->GetValue().utf8_string().c_str());
         e.Skip();
@@ -562,6 +578,12 @@ void MainFrame::on_wake(wxThreadEvent &)
 }
 
 void MainFrame::on_filter_text(wxCommandEvent &)
+{
+    // Restart the debounce window on every edit. See commit_filter.
+    filter_debounce_.StartOnce(180);
+}
+
+void MainFrame::commit_filter()
 {
     std::string text = filter_->GetValue().utf8_string();
     app_->current_filter = filter_parse(text);
@@ -1096,6 +1118,13 @@ void MainFrame::on_filter_key(wxKeyEvent &e)
 {
     int code = e.GetKeyCode();
     if (code == WXK_ESCAPE || code == WXK_RETURN || code == WXK_NUMPAD_ENTER) {
+        // Flush any pending debounced filter edit so leaving the
+        // control commits what the user just typed — otherwise
+        // Enter could land in the list before the requery runs.
+        if (filter_debounce_.IsRunning()) {
+            filter_debounce_.Stop();
+            commit_filter();
+        }
         list_->SetFocus();
         return;
     }

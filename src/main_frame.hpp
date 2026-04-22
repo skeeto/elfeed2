@@ -65,6 +65,11 @@ private:
     // and on-blur.
     void apply_filter(const std::string &text);
 
+    // Re-parse whatever's currently in the filter bar and requery.
+    // Fires from the debounce timer on typing-paused, and from the
+    // Enter/Escape/focus-out paths that flush a pending commit.
+    void commit_filter();
+
     // ---- Selection helpers ----
     void move_selection(int delta);
     void go_to(long row);
@@ -166,6 +171,14 @@ private:
     // bounded; final drain happens at on_close so we don't lose
     // recent entries on a clean exit.
     wxTimer log_drain_timer_;
+
+    // Debounces the filter bar's text-changed event so requery's
+    // DB scan (potentially thousands of rows × 3 sub-queries for
+    // tag/author/enclosure on a large imported DB) doesn't fire
+    // per keystroke. Starts on every edit; the real commit runs
+    // only when the user pauses typing for ~180 ms. Enter / Escape
+    // / focus-out flush the pending commit immediately.
+    wxTimer filter_debounce_;
 };
 
 #endif
