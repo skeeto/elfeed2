@@ -21,6 +21,16 @@
 // config later if it matters.
 static constexpr int64_t kCacheCapBytes = 256LL * 1024 * 1024;
 
+// Upper bound for inlining an image as a data: URI in the preview
+// pane. Above this, we leave the tag's original http src alone and
+// render an adjacent link so the user can open the image in a
+// browser. The wxHtmlWindow path (base64-encode → splice into HTML
+// → HTML-parse → base64-decode → wxImage-decode → layout) all runs
+// synchronously on the UI thread, so a multi-megabyte GIF freezes
+// the app for upwards of a second when you visit the entry. Small
+// images still inline fine and render instantly.
+static constexpr size_t kInlineMaxBytes = 1 * 1024 * 1024;
+
 // Per-batch worker concurrency. 4 matches our fetch workers; beyond
 // that the benefit tapers off and publishers' CDNs dislike it.
 static constexpr size_t kMaxConcurrent = 4;
@@ -310,6 +320,24 @@ std::string make_data_uri(const std::string &mime, const std::string &bytes)
     return out;
 }
 
+// Human-readable size for the "too big to inline" link label.
+// Keeps the message short; a user looking at a 5.7 MB GIF knows
+// why they're seeing a link instead of the picture.
+std::string format_bytes(size_t n)
+{
+    const char *units[] = {"B", "KB", "MB", "GB"};
+    int u = 0;
+    double d = (double)n;
+    while (d >= 1024 && u + 1 < (int)(sizeof(units) / sizeof(*units))) {
+        d /= 1024;
+        u++;
+    }
+    char buf[32];
+    if (u == 0) snprintf(buf, sizeof(buf), "%zu %s", n, units[u]);
+    else        snprintf(buf, sizeof(buf), "%.1f %s", d, units[u]);
+    return buf;
+}
+
 // Replace the src="..." (or src='...') value in `tag` with `new_src`,
 // keeping the rest of the tag intact.
 std::string replace_src(const std::string &tag, const std::string &new_src)
@@ -383,7 +411,21 @@ std::string image_cache_inline(Elfeed *app, const std::string &html)
         if (!src.empty() && is_http_url(src)) {
             std::string mime, bytes;
             if (cache_get(app, src, mime, bytes)) {
-                out.append(replace_src(tag, make_data_uri(mime, bytes)));
+                if (bytes.size() > kInlineMaxBytes) {
+                    // Too big to inline without locking the UI
+                    // thread while wxHtmlWindow decodes. Emit a
+                    // clickable link instead — small label, no
+                    // expensive render, user can open the real
+                    // image in a browser if they want.
+                    out.append("<a href=\"");
+                    out.append(src);
+                    out.append("\">[Image: ");
+                    out.append(format_bytes(bytes.size()));
+                    out.append("]</a>");
+                } else {
+                    out.append(replace_src(tag,
+                        make_data_uri(mime, bytes)));
+                }
             } else {
                 // Miss: leave the original tag (renders broken) and
                 // queue a fetch; the UI will re-render on landing.
