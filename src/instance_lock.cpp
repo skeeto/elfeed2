@@ -1,6 +1,12 @@
 #include "instance_lock.hpp"
 
 #ifdef __WXMSW__
+// snglinst.h's class definition is wrapped in
+// `#if wxUSE_SNGLINST_CHECKER`, and that macro comes from
+// wx/setup.h — which wx/app.h pulls in (via wx/defs.h). Without
+// including wx/app.h first the class disappears and every use
+// below is "incomplete type". The include order matters here.
+#  include <wx/app.h>
 #  include <wx/snglinst.h>
 #  include <wx/string.h>
 #  include <wx/utils.h>
@@ -15,7 +21,9 @@ InstanceLock::InstanceLock() = default;
 
 InstanceLock::~InstanceLock()
 {
-#ifndef __WXMSW__
+#ifdef __WXMSW__
+    delete checker_;  // releases the named kernel mutex
+#else
     // close(2) drops any flock held via this descriptor — the
     // kernel guarantees this happens on process exit too, so a
     // SIGKILL / crash / power loss all end up releasing the lock.
@@ -34,9 +42,12 @@ bool InstanceLock::try_acquire(const std::string &db_path)
     auto token = std::hash<std::string>{}(db_path);
     wxString name = wxString::Format(
         "elfeed2-%s-%lx", wxGetUserId(), (unsigned long)token);
-    auto checker = std::make_unique<wxSingleInstanceChecker>(name);
-    if (checker->IsAnotherRunning()) return false;
-    checker_ = std::move(checker);
+    auto *checker = new wxSingleInstanceChecker(name);
+    if (checker->IsAnotherRunning()) {
+        delete checker;
+        return false;
+    }
+    checker_ = checker;
     return true;
 #else
     // flock() on a "<db>.lock" sidecar file. We don't flock the DB

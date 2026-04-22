@@ -1,7 +1,6 @@
 #ifndef ELFEED_INSTANCE_LOCK_HPP
 #define ELFEED_INSTANCE_LOCK_HPP
 
-#include <memory>
 #include <string>
 
 class wxSingleInstanceChecker;
@@ -37,7 +36,13 @@ public:
 
 private:
 #ifdef __WXMSW__
-    std::unique_ptr<wxSingleInstanceChecker> checker_;
+    // Raw pointer rather than unique_ptr so the forward
+    // declaration of wxSingleInstanceChecker above is sufficient
+    // in this header — unique_ptr's implicit destructor wants
+    // the complete type at the point the class is defined, which
+    // would require pulling <wx/snglinst.h> into every consumer.
+    // Managed by hand in the .cpp's destructor.
+    wxSingleInstanceChecker *checker_ = nullptr;
 #else
     int fd_ = -1;
 #endif

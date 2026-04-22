@@ -1,12 +1,12 @@
 #include "activity_panel.hpp"
 
+#include <wx/datetime.h>
 #include <wx/dcbuffer.h>
 #include <wx/settings.h>
 #include <wx/tooltip.h>
 
 #include <algorithm>
 #include <cmath>
-#include <ctime>
 
 ActivityPanel::ActivityPanel(wxWindow *parent, Elfeed *app)
     : wxPanel(parent, wxID_ANY)
@@ -23,14 +23,15 @@ ActivityPanel::ActivityPanel(wxWindow *parent, Elfeed *app)
 
 int64_t ActivityPanel::day_start_of(double epoch)
 {
-    time_t t = (time_t)epoch;
-    struct tm tm{};
-    localtime_r(&t, &tm);
-    tm.tm_hour  = 0;
-    tm.tm_min   = 0;
-    tm.tm_sec   = 0;
-    tm.tm_isdst = -1;  // renormalize across DST flips
-    return (int64_t)mktime(&tm);
+    // wxDateTime::ResetTime() zeroes out hour/min/sec in local
+    // time while preserving the date — handles DST correctly
+    // across forward/back transitions (the underlying wxDateTime
+    // arithmetic knows about local offsets). Using wxDateTime
+    // throughout instead of <ctime> localtime_r/mktime so the
+    // POSIX-only entry points don't need a Windows fork.
+    wxDateTime dt((time_t)epoch);
+    dt.ResetTime();
+    return (int64_t)dt.GetTicks();
 }
 
 // Sunday-of-this-week minus 52 weeks, at local midnight. This is
@@ -40,29 +41,25 @@ int64_t ActivityPanel::day_start_of(double epoch)
 // makes the weekly-cadence pattern easier to pick out visually.
 static int64_t heatmap_anchor()
 {
-    time_t now = time(nullptr);
-    struct tm tm{};
-    localtime_r(&now, &tm);
-    int dow_sun0 = tm.tm_wday;  // 0=Sun … 6=Sat
-    tm.tm_mday -= dow_sun0 + 52 * 7;
-    tm.tm_hour  = 0;
-    tm.tm_min   = 0;
-    tm.tm_sec   = 0;
-    tm.tm_isdst = -1;
-    return (int64_t)mktime(&tm);
+    wxDateTime dt = wxDateTime::Now();
+    // wxDateTime::WeekDay: Sun=0 … Sat=6, matching struct tm's
+    // tm_wday. Subtracting `dow_sun0` days rolls back to the
+    // Sunday of the current week; subtracting another 52*7 gives
+    // the anchor.
+    int dow_sun0 = (int)dt.GetWeekDay();
+    dt.Subtract(wxDateSpan::Days(dow_sun0 + 52 * 7));
+    dt.ResetTime();
+    return (int64_t)dt.GetTicks();
 }
 
 // Resolve cell (col, row) to the local-midnight epoch of the day it
-// represents, given a heatmap anchor. Uses tm arithmetic so DST
+// represents, given a heatmap anchor. Uses wxDateSpan::Days so DST
 // transitions don't drift the result.
 static int64_t day_at(int64_t anchor, int col, int row)
 {
-    time_t t = (time_t)anchor;
-    struct tm tm{};
-    localtime_r(&t, &tm);
-    tm.tm_mday += col * 7 + row;
-    tm.tm_isdst = -1;
-    return (int64_t)mktime(&tm);
+    wxDateTime dt((time_t)anchor);
+    dt.Add(wxDateSpan::Days(col * 7 + row));
+    return (int64_t)dt.GetTicks();
 }
 
 static wxColour lerp_colour(wxColour a, wxColour b, double t)
@@ -154,7 +151,8 @@ void ActivityPanel::refresh()
     // last ~58 weeks (the heatmap's 53-week window rounded up so
     // we include the full Sunday-anchored leading week) to avoid
     // shipping the full history across for large DBs.
-    double cutoff = (double)time(nullptr) - (int64_t)58 * 7 * 86400;
+    double now = (double)wxDateTime::Now().GetTicks();
+    double cutoff = now - (int64_t)58 * 7 * 86400;
     std::vector<double> dates;
     db_entry_dates_since(app_, cutoff, dates);
 
@@ -177,10 +175,9 @@ void ActivityPanel::refresh()
     for (int col = 0; col < 53; col++) {
         for (int row = 0; row < 7; row++)
             cell_day_[col][row] = day_at(anchor, col, row);
-        time_t t = (time_t)cell_day_[col][0];
-        struct tm tm{};
-        localtime_r(&t, &tm);
-        col_month_[col] = tm.tm_mon;
+        // wxDateTime::Month: Jan=0 … Dec=11, matching struct tm.
+        wxDateTime dt((time_t)cell_day_[col][0]);
+        col_month_[col] = (int)dt.GetMonth();
     }
 
     Refresh();
@@ -237,7 +234,8 @@ void ActivityPanel::on_paint(wxPaintEvent &)
 
     // Today's day-start caps the visible range; future cells
     // (the trailing end of the current week) stay blank.
-    int64_t today_start = day_start_of((double)time(nullptr));
+    int64_t today_start =
+        day_start_of((double)wxDateTime::Now().GetTicks());
 
     // Day-of-week labels (Mon, Wed, Fri) at rows 1, 3, 5. With Sun
     // at row 0 and Sat at row 6, this labels three alternating
@@ -301,19 +299,17 @@ void ActivityPanel::on_motion(wxMouseEvent &e)
         UnsetToolTip(); return;
     }
 
-    int64_t today_start = day_start_of((double)time(nullptr));
-    int64_t d           = cell_day_[col][row];
+    int64_t today_start =
+        day_start_of((double)wxDateTime::Now().GetTicks());
+    int64_t d = cell_day_[col][row];
     if (d > today_start) { UnsetToolTip(); return; }
 
-    time_t t = (time_t)d;
-    struct tm tm{};
-    localtime_r(&t, &tm);
-    char buf[32];
-    strftime(buf, sizeof(buf), "%Y-%m-%d", &tm);
+    wxDateTime dt((time_t)d);
+    wxString date_str = dt.Format("%Y-%m-%d");
 
     auto it = counts_.find(d);
     int count = it != counts_.end() ? it->second : 0;
     SetToolTip(wxString::Format("%s: %d %s",
-                                buf, count,
+                                date_str, count,
                                 count == 1 ? "entry" : "entries"));
 }
