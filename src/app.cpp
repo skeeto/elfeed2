@@ -299,31 +299,15 @@ bool ElfeedApp::OnInit()
     // :..."> silently drops.
     wxFileSystem::AddHandler(new DataURIHandler);
 
-    // Single-instance guard. Two copies running against the same
-    // SQLite database would race on writes and the AUI/geometry
-    // state would clobber each other at close time. Scope the lock
-    // per (user, DB) so a --db override (e.g. a test instance
-    // against /tmp/test.db) doesn't conflict with the production
-    // instance against the default DB. Drop the lock file in the
-    // DB's own directory rather than $HOME (wx's default): on an
-    // unclean exit the file isn't unlinked, and having the stray
-    // files collect next to the DB is much tidier than seeing
-    // them pile up at the top of the user's home.
-    auto db_token = std::hash<std::string>{}(state_.db_path);
-    wxString lock_name = wxString::Format(
-        "elfeed2-%s-%lx", wxGetUserId(), (unsigned long)db_token);
-    wxString lock_dir;
-    {
-        wxFileName fn(wxString::FromUTF8(state_.db_path));
-        if (fn.HasName()) lock_dir = fn.GetPath();
-    }
-    instance_checker_ =
-        std::make_unique<wxSingleInstanceChecker>(lock_name, lock_dir);
-    if (instance_checker_->IsAnotherRunning()) {
+    // Single-instance guard scoped to the DB path. See
+    // instance_lock.{hpp,cpp}: on Windows this is a named kernel
+    // mutex (OS-managed, no filesystem trace); on POSIX it's a
+    // flock() on a `<db>.lock` sidecar file (kernel releases on
+    // process exit, clean or not).
+    if (!instance_lock_.try_acquire(state_.db_path)) {
         wxMessageBox("Another Elfeed2 instance is already running "
                      "against this database.",
                      "Elfeed2", wxOK | wxICON_INFORMATION);
-        instance_checker_.reset();
         return false;
     }
 

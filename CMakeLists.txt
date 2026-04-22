@@ -118,6 +118,7 @@ endif()
 
 set(elfeed_sources
   src/app.cpp
+  src/instance_lock.cpp
   src/main_frame.cpp
   src/entry_list.cpp
   src/entry_detail.cpp
