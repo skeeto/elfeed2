@@ -371,7 +371,14 @@ static void parse_atom(const std::string &url, pugi::xml_node root,
         if (!feed_node) feed_node = root;
     }
 
-    result.feed_title = elfeed_cleanup(child_text(feed_node, "title"));
+    // Titles arrive as `type="html"` in a lot of real-world Atom
+    // feeds even when the text looks like plain prose, so chars
+    // end up double-encoded in the XML (`&amp;#8211;` → XML
+    // decodes to `&#8211;` → html_strip decodes to en-dash).
+    // Running html_strip here decodes the HTML entities *once*,
+    // producing a clean display string. Plain-text titles with
+    // no HTML pass through unchanged.
+    result.feed_title = elfeed_cleanup(html_strip(child_text(feed_node, "title")));
 
     auto feed_authors = atom_authors(feed_node);
     if (!feed_authors.empty())
@@ -387,7 +394,7 @@ static void parse_atom(const std::string &url, pugi::xml_node root,
         e.feed_url = url;
         e.namespace_ = ns;
 
-        e.title = elfeed_cleanup(child_text(entry_node, "title"));
+        e.title = elfeed_cleanup(html_strip(child_text(entry_node, "title")));
 
         // xml:base for this entry
         std::string entry_base = attr_val(entry_node, "base");
@@ -492,7 +499,11 @@ static void parse_rss2(const std::string &url, pugi::xml_node root,
     auto channel = find_child(rss ? rss : root, "channel");
     if (!channel) return;
 
-    result.feed_title = elfeed_cleanup(child_text(channel, "title"));
+    // RSS titles have no explicit type attribute; some publishers
+    // embed HTML, some don't. html_strip is safe for plain text
+    // (no entities + no tags = no-op) and decodes the ones that
+    // do contain HTML, matching what browsers render.
+    result.feed_title = elfeed_cleanup(html_strip(child_text(channel, "title")));
 
     std::string protocol = url_protocol(url);
     std::string ns = url_to_namespace(url);
@@ -503,7 +514,7 @@ static void parse_rss2(const std::string &url, pugi::xml_node root,
         e.namespace_ = ns;
         e.content_type = "html";
 
-        e.title = elfeed_cleanup(child_text(item, "title"));
+        e.title = elfeed_cleanup(html_strip(child_text(item, "title")));
 
         std::string guid = child_text(item, "guid");
         std::string link = child_text(item, "link");
@@ -564,7 +575,11 @@ static void parse_rss1(const std::string &url, pugi::xml_node root,
     auto rdf = root;
     auto channel = find_child(rdf, "channel");
     if (channel)
-        result.feed_title = elfeed_cleanup(child_text(channel, "title"));
+        // RSS titles have no explicit type attribute; some publishers
+    // embed HTML, some don't. html_strip is safe for plain text
+    // (no entities + no tags = no-op) and decodes the ones that
+    // do contain HTML, matching what browsers render.
+    result.feed_title = elfeed_cleanup(html_strip(child_text(channel, "title")));
 
     std::string ns = url_to_namespace(url);
 
@@ -574,7 +589,7 @@ static void parse_rss1(const std::string &url, pugi::xml_node root,
         e.namespace_ = ns;
         e.content_type = "html";
 
-        e.title = elfeed_cleanup(child_text(item, "title"));
+        e.title = elfeed_cleanup(html_strip(child_text(item, "title")));
         e.link = elfeed_cleanup(child_text(item, "link"));
 
         std::string date_str = child_text(item, "pubDate");

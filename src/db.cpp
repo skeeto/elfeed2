@@ -286,7 +286,12 @@ void db_load_feed_titles(Elfeed *app)
         const char *url = (const char *)sqlite3_column_text(stmt, 0);
         const char *title = (const char *)sqlite3_column_text(stmt, 1);
         if (url && title && *title)
-            app->feed_titles.emplace(url, title);
+            // html_strip here is a one-shot cleanup for DBs that
+            // pre-date feed.cpp's parse-time decoding — existing
+            // rows may still contain raw `&#8211;`-style entities
+            // until their feed is next fetched. Idempotent for
+            // already-clean titles.
+            app->feed_titles.emplace(url, html_strip(title));
     }
     sqlite3_finalize(stmt);
 }
