@@ -4,6 +4,8 @@ Standalone feed reader, successor to [Elfeed][elfeed]. The goal: replicate
 the Elfeed experience without Emacs. Built with C++20, wxWidgets, SQLite3,
 pugixml, cpp-httplib, and mbedTLS.
 
+![](assets/screenshot.png)
+
 **This is an early work in progress.** Expect breakage. Config format and
 database schema are not locked down. You may need to delete your database
 between updates. Use the import feature (File menu) to load your classic
