@@ -41,6 +41,14 @@ public:
     // elsewhere in the app.
     bool try_preset_key(wxKeyEvent &e);
 
+    // EntryDetail's wxEVT_CHAR_HOOK forwards to this. Handles the
+    // reader-mode bindings (q/Escape return to list; n/p step
+    // between entries; b/y/d/u act on the selection like in the
+    // listing). Unhandled keys fall through to try_preset_key and
+    // then e.Skip() so wxHtmlWindow's own navigation (arrow keys
+    // for scrolling, etc.) still works.
+    void on_detail_key(wxKeyEvent &e);
+
 private:
     // ---- Building ----
     void build_menus();
@@ -61,6 +69,11 @@ private:
     void move_selection(int delta);
     void go_to(long row);
     void advance_from(long row);
+    // Detail-pane n/p equivalent: move the list's primary row by
+    // `delta` and explicitly repaint the detail pane. Used from
+    // on_detail_key where focus is on the preview (so the normal
+    // selection-changed chain that j/k relies on isn't guaranteed).
+    void step_entry(int delta);
 
     // ---- Pane helpers ----
     void toggle_pane(const char *name);

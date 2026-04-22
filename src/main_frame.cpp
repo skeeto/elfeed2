@@ -1031,6 +1031,34 @@ bool MainFrame::try_preset_key(wxKeyEvent &e)
     return true;
 }
 
+void MainFrame::on_detail_key(wxKeyEvent &e)
+{
+    // Reader-mode bindings, active while the preview pane has focus.
+    // Plain single letters only — wxHtmlWindow's built-in scrolling
+    // (arrow keys, Page Up/Down, Home/End) still works because we
+    // Skip() for anything we don't recognize.
+    int code = e.GetKeyCode();
+    bool plain = !e.HasAnyModifiers();
+    if (plain) {
+        switch (code) {
+        case WXK_ESCAPE:
+        case 'Q':
+            // Return focus to the listing. The detail pane stays
+            // visible; it's just no longer the keyboard target.
+            list_->SetFocus();
+            return;
+        case 'N': step_entry(+1);           return;
+        case 'P': step_entry(-1);           return;
+        case 'B': action_open_in_browser(); return;
+        case 'Y': action_copy_link();       return;
+        case 'D': action_download();        return;
+        case 'U': action_mark_unread();     return;
+        }
+    }
+    if (try_preset_key(e)) return;
+    e.Skip();
+}
+
 void MainFrame::on_filter_key(wxKeyEvent &e)
 {
     int code = e.GetKeyCode();
@@ -1114,6 +1142,22 @@ void MainFrame::advance_from(long row)
     list_->select_only(next);
     list_->ensure_visible_row(next);
     detail_->show_entry(&app_->entries[(size_t)next]);
+}
+
+void MainFrame::step_entry(int delta)
+{
+    long p = list_->primary();
+    long n = (long)app_->entries.size();
+    if (p < 0) return;
+    long target = p + delta;
+    if (target < 0 || target >= n) return;
+    // Use select_only (not select_range) — stepping in the detail
+    // pane shouldn't silently extend a visual range; if the user
+    // wants that workflow they can do it from the list.
+    visual_anchor_ = -1;
+    list_->select_only(target);
+    list_->ensure_visible_row(target);
+    detail_->show_entry(&app_->entries[(size_t)target]);
 }
 
 // ---- Actions -------------------------------------------------------

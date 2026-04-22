@@ -28,6 +28,11 @@ public:
     // position is preserved so the user's reading spot doesn't jump.
     void relayout();
 
+    // Give keyboard focus to the HTML body (the only tabstop child).
+    // Used by MainFrame when Enter is pressed in the listing to drop
+    // the user into reader mode.
+    void focus_body();
+
 private:
     void on_link_click(wxMouseEvent &);
     void render();  // rebuild HTML from current_ and push to body_

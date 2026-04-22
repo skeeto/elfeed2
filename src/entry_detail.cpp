@@ -79,17 +79,20 @@ EntryDetail::EntryDetail(wxWindow *parent, Elfeed *app)
         relayout();
         e.Skip();
     });
-    // Forward unhandled key presses to the main frame's preset
-    // dispatcher so the same one-letter `preset` keys work while
-    // reading an entry. wxEVT_CHAR_HOOK fires before the html
-    // window's own key handling, so letters that don't match a
-    // preset still scroll/select normally via Skip.
+    // Forward keypresses to MainFrame's on_detail_key, which
+    // dispatches the reader-mode bindings (q/Escape to return to
+    // the list, n/p to step entries, b/y/d/u to act on selection)
+    // and falls through to the preset dispatcher and wxHtmlWindow's
+    // native scrolling for anything else. wxEVT_CHAR_HOOK fires
+    // before the html window's own key handling, which is what lets
+    // us intercept plain letters at all.
     body_->Bind(wxEVT_CHAR_HOOK, [this](wxKeyEvent &e) {
         if (auto *frame =
                 dynamic_cast<MainFrame *>(wxGetTopLevelParent(this))) {
-            if (frame->try_preset_key(e)) return;
+            frame->on_detail_key(e);
+        } else {
+            e.Skip();
         }
-        e.Skip();
     });
 
     auto *sz = new wxBoxSizer(wxVERTICAL);
@@ -107,6 +110,11 @@ void EntryDetail::on_link_click(wxMouseEvent &)
 {
     if (!link_url_.empty())
         wxLaunchDefaultBrowser(wxString::FromUTF8(link_url_));
+}
+
+void EntryDetail::focus_body()
+{
+    if (body_) body_->SetFocus();
 }
 
 void EntryDetail::show_entry(const Entry *e)
