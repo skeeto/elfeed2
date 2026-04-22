@@ -1,11 +1,129 @@
 #include "entry_list.hpp"
 #include "util.hpp"
 
+#include <wx/dc.h>
+#include <wx/dcscreen.h>
 #include <wx/font.h>
 #include <wx/variant.h>
 
 #include <algorithm>
 #include <unordered_set>
+
+#ifdef __WXMAC__
+#include <CoreText/CoreText.h>
+
+// Build a wxFont based on the system font at `point_size` with the
+// "monospaced numbers" OpenType feature enabled. Letters and
+// punctuation stay in their natural proportional shapes; only
+// digits get equal advance widths so successive dates line up.
+// macOS exposes this via Core Text feature settings; wxFont has a
+// CTFontRef constructor we can pass the result to.
+static wxFont tabular_system_font(int point_size)
+{
+    CTFontRef base = CTFontCreateUIFontForLanguage(
+        kCTFontUIFontSystem, (CGFloat)point_size, NULL);
+    if (!base) return *wxNORMAL_FONT;
+
+    int feat_type = kNumberSpacingType;
+    int feat_sel  = kMonospacedNumbersSelector;
+    CFNumberRef nType = CFNumberCreate(NULL, kCFNumberIntType, &feat_type);
+    CFNumberRef nSel  = CFNumberCreate(NULL, kCFNumberIntType, &feat_sel);
+
+    const void *fkeys[] = {
+        kCTFontFeatureTypeIdentifierKey,
+        kCTFontFeatureSelectorIdentifierKey,
+    };
+    const void *fvals[] = { nType, nSel };
+    CFDictionaryRef feature = CFDictionaryCreate(
+        NULL, fkeys, fvals, 2,
+        &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+    CFRelease(nType); CFRelease(nSel);
+
+    const void *farr[] = { feature };
+    CFArrayRef features = CFArrayCreate(NULL, farr, 1,
+                                        &kCFTypeArrayCallBacks);
+    CFRelease(feature);
+
+    const void *akeys[] = { kCTFontFeatureSettingsAttribute };
+    const void *avals[] = { features };
+    CFDictionaryRef attrs = CFDictionaryCreate(
+        NULL, akeys, avals, 1,
+        &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+    CFRelease(features);
+
+    CTFontDescriptorRef desc =
+        CTFontDescriptorCreateWithAttributes(attrs);
+    CFRelease(attrs);
+
+    CTFontRef tabular =
+        CTFontCreateCopyWithAttributes(base, 0.0, NULL, desc);
+    CFRelease(base);
+    CFRelease(desc);
+
+    if (!tabular) return *wxNORMAL_FONT;
+    wxFont f(tabular);
+    CFRelease(tabular);
+    return f;
+}
+#endif  // __WXMAC__
+
+// Renders the cell text using the system font with tabular figures
+// so successive rows' digits align. On macOS the system font's
+// "monospaced numbers" OpenType feature does this without changing
+// the typeface — letters/dashes look identical to the rest of the
+// list. On other platforms we fall back to the default font (the
+// renderer becomes a no-op wrapper); fix per-platform if it ever
+// matters there.
+class TabularTextRenderer : public wxDataViewCustomRenderer {
+public:
+    TabularTextRenderer()
+        : wxDataViewCustomRenderer(
+              "string", wxDATAVIEW_CELL_INERT, wxALIGN_LEFT) {}
+
+    bool SetValue(const wxVariant &v) override {
+        value_ = v.GetString();
+        return true;
+    }
+    bool GetValue(wxVariant &v) const override {
+        v = value_;
+        return true;
+    }
+
+    wxSize GetSize() const override {
+        wxScreenDC dc;
+        dc.SetFont(font_for_view());
+        return dc.GetTextExtent(value_);
+    }
+
+    bool Render(wxRect rect, wxDC *dc, int state) override {
+        wxFont f = font_for_view();
+        const wxDataViewItemAttr &attr = GetAttr();
+        if (attr.GetBold())   f.MakeBold();
+        if (attr.GetItalic()) f.MakeItalic();
+
+        wxFont saved_font = dc->GetFont();
+        wxColour saved_fg = dc->GetTextForeground();
+        dc->SetFont(f);
+        if (attr.HasColour()) dc->SetTextForeground(attr.GetColour());
+        RenderText(value_, 0, rect, dc, state);
+        dc->SetFont(saved_font);
+        dc->SetTextForeground(saved_fg);
+        return true;
+    }
+
+private:
+    wxFont font_for_view() const {
+        wxDataViewCtrl *view = GetView();
+        wxFont base = view ? view->GetFont() : *wxNORMAL_FONT;
+#ifdef __WXMAC__
+        return tabular_system_font(base.GetPointSize());
+#else
+        return base;
+#endif
+    }
+
+    wxString value_;
+};
 
 static bool has_tag(const Entry &e, const char *tag)
 {
@@ -200,8 +318,12 @@ void EntryList::append_column(const wxString &title)
                       wxDATAVIEW_COL_REORDERABLE |
                       wxDATAVIEW_COL_SORTABLE;
     if (title == "Date") {
-        AppendTextColumn("Date",  0, wxDATAVIEW_CELL_INERT,
-                         FromDIP(90),  wxALIGN_LEFT, flags);
+        // Custom renderer (instead of AppendTextColumn) so dates
+        // render in tabular figures and digits line up across rows
+        // — proportional shapes for everything else.
+        AppendColumn(new wxDataViewColumn(
+            "Date", new TabularTextRenderer(), 0,
+            FromDIP(90), wxALIGN_LEFT, flags));
     } else if (title == "Title") {
         AppendTextColumn("Title", 1, wxDATAVIEW_CELL_INERT,
                          FromDIP(400), wxALIGN_LEFT, flags);
