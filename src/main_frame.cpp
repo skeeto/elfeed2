@@ -397,7 +397,10 @@ void MainFrame::requery()
 
     db_query_entries(app_, app_->current_filter, app_->entries);
     list_->refresh_items();
-    if (activity_) activity_->refresh();
+    // Note: activity_ is filter-independent, driven by the DB
+    // directly, so a requery (which runs on every filter keystroke)
+    // should not trigger it. Activity refresh happens on_wake when
+    // new_entries lands, on pane-show, and after import.
 
     long new_primary = -1;
     if (!sel_ns.empty()) {
@@ -497,6 +500,8 @@ void MainFrame::toggle_pane(const char *name)
             downloads_->refresh();
         else if (std::string(name) == "feeds" && feeds_)
             feeds_->refresh();
+        else if (std::string(name) == "activity" && activity_)
+            activity_->refresh();
     }
 }
 
@@ -531,6 +536,12 @@ void MainFrame::on_wake(wxThreadEvent &)
     if (new_entries) {
         requery();
         if (feeds_) feeds_->refresh();  // titles may have been filled in
+        // Activity's DB query is the only one of the bottom panes
+        // that touches real storage, so gate it on new entries
+        // actually landing (rather than refreshing on every wake).
+        // When hidden, the refresh is skipped entirely; toggle_pane
+        // freshens the data on next show.
+        if (pane_shown("activity") && activity_) activity_->refresh();
     }
     // Drain the inline-image inbox: worker threads push downloaded
     // bytes, we write them to the cache table, and if anything
@@ -548,7 +559,6 @@ void MainFrame::on_wake(wxThreadEvent &)
     download_tick(app_);
     if (pane_shown("log")       && log_)       log_->refresh();
     if (pane_shown("downloads") && downloads_) downloads_->refresh();
-    if (pane_shown("activity")  && activity_)  activity_->refresh();
 }
 
 void MainFrame::on_filter_text(wxCommandEvent &)
@@ -632,6 +642,9 @@ void MainFrame::do_import_classic()
     db_load_feed_titles(app_);
     requery();
     if (feeds_) feeds_->refresh();
+    // Import just dumped a year (or more) of entries into the DB —
+    // the heatmap shape changes completely, so refresh if visible.
+    if (pane_shown("activity") && activity_) activity_->refresh();
     update_status();
 
     wxMessageBox(
