@@ -266,6 +266,11 @@ void db_entry_dates_since(Elfeed *app, double since,
 // coincidence. Feeds with zero entries are absent from the map.
 void db_feed_newest_entry_dates(
     Elfeed *app, std::unordered_map<std::string, double> &out);
+// Empty the image cache and VACUUM the DB. Returns approximate
+// bytes freed (file-size delta before → after). Blocks on the
+// UI thread while running — VACUUM rebuilds the whole file, so
+// call under a wxBusyInfo for visible feedback.
+int64_t db_reclaim_space(Elfeed *app);
 void db_tag(Elfeed *app, const std::string &ns, const std::string &id,
             const std::string &tag);
 void db_untag(Elfeed *app, const std::string &ns, const std::string &id,

@@ -924,6 +924,32 @@ void db_entry_dates_since(Elfeed *app, double since,
     sqlite3_finalize(stmt);
 }
 
+int64_t db_reclaim_space(Elfeed *app)
+{
+    if (!app->db) return 0;
+    auto db_size = [&]() -> int64_t {
+        wxFileName fn(wxString::FromUTF8(app->db_path));
+        return fn.FileExists() ? (int64_t)fn.GetSize().GetValue() : 0;
+    };
+    int64_t before = db_size();
+
+    // The image cache is explicitly a cache: preview-pane fetches
+    // re-populate on demand, so dropping it is user-safe. Clearing
+    // it before VACUUM lets the rewrite skip all those blob rows
+    // and gives the freed pages back to the OS rather than parking
+    // them on SQLite's freelist.
+    sqlite3_exec(app->db, "DELETE FROM image_cache",
+                 nullptr, nullptr, nullptr);
+    // VACUUM rebuilds the DB file in place — repacks every page,
+    // recomputes indexes, and truncates the trailing freelist.
+    // Holds a write lock for the duration. Caller must not have
+    // any in-flight prepared statements on the connection.
+    sqlite3_exec(app->db, "VACUUM", nullptr, nullptr, nullptr);
+
+    int64_t after = db_size();
+    return before > after ? before - after : 0;
+}
+
 void db_feed_newest_entry_dates(
     Elfeed *app, std::unordered_map<std::string, double> &out)
 {

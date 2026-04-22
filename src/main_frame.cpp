@@ -17,6 +17,7 @@
 #include <wx/dialog.h>
 #include <wx/display.h>
 #include <wx/filedlg.h>
+#include <wx/filename.h>
 #include <wx/hyperlink.h>
 #include <wx/icon.h>
 #include <wx/menu.h>
@@ -35,6 +36,7 @@ enum {
     ID_Fetch = wxID_HIGHEST + 1,
     ID_ImportClassic,
     ID_ReloadConfig,
+    ID_ReclaimSpace,
     ID_ToggleFeeds,
     ID_TogglePreview,
     ID_ToggleLog,
@@ -179,6 +181,9 @@ void MainFrame::build_menus()
     m_elfeed->Append(ID_ReloadConfig, "&Reload Config\tCtrl+Shift+R");
     m_elfeed->AppendSeparator();
     m_elfeed->Append(ID_ImportClassic, wxT("&Import Classic Elfeed Index…"));
+    // Drops the image LRU and VACUUMs the DB. Named for what the
+    // user gets rather than what SQLite calls it.
+    m_elfeed->Append(ID_ReclaimSpace, wxT("Reclaim &Disk Space…"));
     m_elfeed->AppendSeparator();
     m_elfeed->Append(wxID_EXIT, "&Quit\tCtrl+Q");
     mbar->Append(m_elfeed, "&Elfeed");
@@ -355,6 +360,7 @@ void MainFrame::bind_events()
     Bind(wxEVT_MENU, &MainFrame::on_fetch_all,        this, ID_Fetch);
     Bind(wxEVT_MENU, &MainFrame::on_reload_config,    this, ID_ReloadConfig);
     Bind(wxEVT_MENU, &MainFrame::on_import_classic,   this, ID_ImportClassic);
+    Bind(wxEVT_MENU, &MainFrame::on_reclaim_space,    this, ID_ReclaimSpace);
     Bind(wxEVT_MENU, &MainFrame::on_toggle_feeds,     this, ID_ToggleFeeds);
     Bind(wxEVT_MENU, &MainFrame::on_toggle_preview,   this, ID_TogglePreview);
     Bind(wxEVT_MENU, &MainFrame::on_toggle_log,       this, ID_ToggleLog);
@@ -690,6 +696,30 @@ void MainFrame::do_import_classic()
                                    stats.entries_skipped)
                 : wxString()),
         "Import Complete", wxOK | wxICON_INFORMATION, this);
+}
+
+void MainFrame::on_reclaim_space(wxCommandEvent &)
+{
+    // Flush any coalesced-but-not-yet-written log entries first so
+    // VACUUM's write lock doesn't fight the periodic drain timer.
+    log_drain_to_db(app_);
+
+    int64_t saved;
+    {
+        // VACUUM takes seconds on a mid-sized DB — show a modal
+        // busy indicator so the user knows we're working, not
+        // hung. Scope limits the indicator to the call.
+        wxBusyInfo busy(wxT("Reclaiming disk space…"), this);
+        saved = db_reclaim_space(app_);
+    }
+
+    if (saved > 0) {
+        flash_status(wxString::Format(
+            "Freed %s of disk space",
+            wxFileName::GetHumanReadableSize(wxULongLong(saved))));
+    } else {
+        flash_status(wxT("Database already compact"));
+    }
 }
 
 void MainFrame::on_toggle_feeds(wxCommandEvent &)     { toggle_pane("feeds"); }
