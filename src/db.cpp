@@ -108,6 +108,41 @@ CREATE TABLE IF NOT EXISTS log_entry (
 
 CREATE INDEX IF NOT EXISTS idx_log_entry_time
     ON log_entry(time);
+
+-- Full-text search index over every entry's title + link + content.
+-- Shadows the main entry table via rowid: triggers below mirror
+-- INSERT / UPDATE / DELETE so the two stay in lockstep without the
+-- write paths needing to know about FTS. The default unicode61
+-- tokenizer case-folds and splits on unicode word boundaries,
+-- which matches what a feed reader's bare keyword filter wants
+-- (no special tokenizer knobs, same behavior on every platform).
+CREATE VIRTUAL TABLE IF NOT EXISTS entry_fts USING fts5(
+    title, link, content,
+    tokenize='unicode61'
+);
+
+CREATE TRIGGER IF NOT EXISTS entry_fts_ai AFTER INSERT ON entry
+BEGIN
+    INSERT INTO entry_fts(rowid, title, link, content)
+    VALUES (new.rowid, new.title, new.link, new.content);
+END;
+
+CREATE TRIGGER IF NOT EXISTS entry_fts_ad AFTER DELETE ON entry
+BEGIN
+    DELETE FROM entry_fts WHERE rowid = old.rowid;
+END;
+
+-- db_add_entries uses ON CONFLICT(namespace,id) DO UPDATE on
+-- refetches, which fires AFTER UPDATE (not INSERT+DELETE), so
+-- the rowid is stable and we just refresh the indexed columns.
+CREATE TRIGGER IF NOT EXISTS entry_fts_au AFTER UPDATE ON entry
+BEGIN
+    UPDATE entry_fts SET
+        title   = new.title,
+        link    = new.link,
+        content = new.content
+    WHERE rowid = old.rowid;
+END;
 )";
 
 // --- Database operations ---
@@ -143,6 +178,40 @@ void db_open(Elfeed *app)
     if (rc != SQLITE_OK) {
         fprintf(stderr, "elfeed: schema: %s\n", err);
         sqlite3_free(err);
+    }
+
+    // One-time backfill: if the FTS table is empty but there are
+    // entries, we just added FTS to a pre-existing DB. Bulk-copy
+    // the rows in (same rowid so lookups join cleanly). Subsequent
+    // writes keep in sync via triggers, so this runs at most once
+    // per DB file.
+    {
+        sqlite3_stmt *cnt = nullptr;
+        int64_t fts_rows = 0, entry_rows = 0;
+        if (sqlite3_prepare_v2(app->db,
+                "SELECT (SELECT COUNT(*) FROM entry_fts),"
+                " (SELECT COUNT(*) FROM entry)",
+                -1, &cnt, nullptr) == SQLITE_OK) {
+            if (sqlite3_step(cnt) == SQLITE_ROW) {
+                fts_rows   = sqlite3_column_int64(cnt, 0);
+                entry_rows = sqlite3_column_int64(cnt, 1);
+            }
+            sqlite3_finalize(cnt);
+        }
+        if (fts_rows == 0 && entry_rows > 0) {
+            fprintf(stderr,
+                "elfeed: indexing %lld entries for full-text search…\n",
+                (long long)entry_rows);
+            char *ferr = nullptr;
+            int frc = sqlite3_exec(app->db,
+                "INSERT INTO entry_fts(rowid, title, link, content)"
+                " SELECT rowid, title, link, content FROM entry",
+                nullptr, nullptr, &ferr);
+            if (frc != SQLITE_OK) {
+                fprintf(stderr, "elfeed: fts backfill: %s\n", ferr);
+                sqlite3_free(ferr);
+            }
+        }
     }
 }
 
