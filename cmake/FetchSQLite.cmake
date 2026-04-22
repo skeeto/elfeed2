@@ -45,4 +45,10 @@ target_compile_definitions(sqlite3 PRIVATE
   SQLITE_LIKE_DOESNT_MATCH_BLOBS
   SQLITE_OMIT_DEPRECATED
   SQLITE_OMIT_SHARED_CACHE
+  # FTS5 is an opt-in amalgamation feature; without this define
+  # `CREATE VIRTUAL TABLE ... USING fts5(...)` fails at schema
+  # init and the filter path's MATCH queries silently match
+  # nothing. LOCAL builds get FTS5 from the distro's libsqlite3,
+  # which has it enabled by default on every platform we target.
+  SQLITE_ENABLE_FTS5
 )
