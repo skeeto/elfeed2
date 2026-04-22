@@ -75,36 +75,64 @@ static wxColour lerp_colour(wxColour a, wxColour b, double t)
         (unsigned char)(a.Blue()  + (b.Blue()  - a.Blue())  * t));
 }
 
-// Continuous color for a given (count, max_c). Two gradient
-// endpoints per theme (light/dark), log-compressed interpolation
-// against max. Going continuous rather than discretizing into N
-// fixed buckets gives the gradient more perceived dynamic range
-// on any distribution — bucketing meant typical days all rounded
-// to the same 1–2 levels even with a wide count spread.
+// Jet-like ramp: seven stops spanning the full hue wheel from
+// cool to warm. Unlike a single-hue lightness ramp (which tops
+// out in perceived dynamic range because we only vary one channel),
+// jet crosses through multiple hues — dark blue, blue, cyan,
+// green, yellow, red, dark red — so every part of the distribution
+// lands on a visibly distinct color. Well-known downsides (not
+// perceptually uniform in luminance, tricky for some kinds of
+// colorblindness) are acceptable here because the task is "spot
+// the pattern at a glance," not precise quantitative reading.
+namespace {
+struct Stop { double t; wxColour c; };
+}
+static const Stop jet_stops[] = {
+    {0.00, wxColour(  0,   0, 143)},
+    {0.11, wxColour(  0,   0, 255)},
+    {0.36, wxColour(  0, 255, 255)},
+    {0.52, wxColour(  0, 255,   0)},
+    {0.68, wxColour(255, 255,   0)},
+    {0.87, wxColour(255,   0,   0)},
+    {1.00, wxColour(143,   0,   0)},
+};
+
+static wxColour jet_at(double t)
+{
+    if (t <= 0) return jet_stops[0].c;
+    constexpr size_t n = sizeof(jet_stops) / sizeof(jet_stops[0]);
+    for (size_t i = 1; i < n; i++) {
+        if (t <= jet_stops[i].t) {
+            double span = jet_stops[i].t - jet_stops[i - 1].t;
+            double lt   = span > 0
+                              ? (t - jet_stops[i - 1].t) / span
+                              : 0.0;
+            return lerp_colour(jet_stops[i - 1].c, jet_stops[i].c, lt);
+        }
+    }
+    return jet_stops[n - 1].c;
+}
+
+// Continuous color for a given (count, max_c). Empty cells track
+// the theme background (faint tint) so the grid structure reads
+// on quiet days; non-empty cells map their log-compressed t
+// through the jet ramp.
 static wxColour colour_for_count(wxColour bg, int count, int max_c)
 {
-    // Light theme: near-bg gray-blue → deep navy.
-    // Dark theme:  near-bg near-black → bright saturated blue.
-    // Selected by window-bg luminance (ITU-R BT.709 approximation).
     double luma = (0.2126 * bg.Red() +
                    0.7152 * bg.Green() +
                    0.0722 * bg.Blue()) / 255.0;
     bool dark = luma < 0.5;
     wxColour empty_c = dark ? wxColour(22, 27, 34)
                             : wxColour(235, 237, 240);
-    wxColour peak_c  = dark ? wxColour(140, 208, 255)
-                            : wxColour(  8,  40, 102);
 
     if (count <= 0) return empty_c;
-    if (max_c <= 1) return peak_c;
+    if (max_c <= 1) return jet_stops[sizeof(jet_stops) /
+                                     sizeof(jet_stops[0]) - 1].c;
 
     double t = std::log(1.0 + (double)count) /
                std::log(1.0 + (double)max_c);
-    // Floor the minimum blend so a single-entry day is always
-    // clearly "lit" — without this, a lone count=1 against a
-    // max=500 outlier would blend back into empty_c and vanish.
-    if (t < 0.18) t = 0.18;
-    return lerp_colour(empty_c, peak_c, t);
+    return jet_at(t);
 }
 
 void ActivityPanel::refresh()
