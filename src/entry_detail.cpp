@@ -3,6 +3,7 @@
 #include "main_frame.hpp"
 #include "util.hpp"
 
+#include <wx/colour.h>
 #include <wx/cursor.h>
 #include <wx/font.h>
 #include <wx/html/htmlwin.h>
@@ -10,6 +11,8 @@
 #include <wx/sizer.h>
 #include <wx/stattext.h>
 #include <wx/utils.h>
+
+#include <cstdio>
 
 EntryDetail::EntryDetail(wxWindow *parent, Elfeed *app)
     : wxPanel(parent, wxID_ANY)
@@ -67,6 +70,15 @@ EntryDetail::EntryDetail(wxWindow *parent, Elfeed *app)
                 [](wxHtmlLinkEvent &e) {
                     wxLaunchDefaultBrowser(e.GetLinkInfo().GetHref());
                 });
+    // Re-render on system theme switch (light ↔ dark) so the
+    // preview's <body> wrapper picks up the new system colors.
+    // wxEVT_SYS_COLOUR_CHANGED bubbles up to top-level windows;
+    // bind on the panel and forward to relayout (which preserves
+    // scroll position).
+    Bind(wxEVT_SYS_COLOUR_CHANGED, [this](wxSysColourChangedEvent &e) {
+        relayout();
+        e.Skip();
+    });
     // Forward unhandled key presses to the main frame's preset
     // dispatcher so the same one-letter `preset` keys work while
     // reading an entry. wxEVT_CHAR_HOOK fires before the html
@@ -200,6 +212,31 @@ void EntryDetail::render()
     // Cheap for a document with no images; only the fetched-and-not-
     // yet-cached images trigger background work.
     body = image_cache_inline(app_, body);
+
+    // Wrap in a body tag whose colors track the system theme so the
+    // preview pane reads correctly in dark mode. wxHtmlWindow has
+    // very limited CSS but does honor legacy <body bgcolor= text=
+    // link= vlink=> attributes — exactly what we need. Sites that
+    // set their own colors inline will still override these, which
+    // is fine: this is a baseline, not a theme enforcement.
+    wxColour bg   = wxSystemSettings::GetColour(wxSYS_COLOUR_WINDOW);
+    wxColour fg   = wxSystemSettings::GetColour(wxSYS_COLOUR_WINDOWTEXT);
+    wxColour link = wxSystemSettings::GetColour(wxSYS_COLOUR_HOTLIGHT);
+    char wrapper[256];
+    snprintf(wrapper, sizeof(wrapper),
+             "<body bgcolor='#%02x%02x%02x' text='#%02x%02x%02x' "
+             "link='#%02x%02x%02x' vlink='#%02x%02x%02x'>",
+             bg.Red(), bg.Green(), bg.Blue(),
+             fg.Red(), fg.Green(), fg.Blue(),
+             link.Red(), link.Green(), link.Blue(),
+             link.Red(), link.Green(), link.Blue());
+    body = std::string(wrapper) + body + "</body>";
+
+    // Match the wxHtmlWindow's own background to the system color
+    // too — without this, the area outside the rendered HTML
+    // (margins around content) keeps the wxWidgets default white
+    // and looks wrong in dark mode.
+    body_->SetBackgroundColour(bg);
 
     body_->SetPage(wxString::FromUTF8(body));
 }
