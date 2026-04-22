@@ -25,20 +25,31 @@ os.makedirs(OUT, exist_ok=True)
 def render(size: int) -> Image.Image:
     """Render the icon at exactly `size` pixels. Renders fresh at each
     size (rather than downscaling a single high-res master) so 16/32/48
-    keep crisp edges; the font/padding scale proportionally."""
+    keep crisp edges; the font/padding scale proportionally.
+
+    Follows Apple's macOS icon-grid template: the rounded square
+    occupies the inner ~80% of the canvas (824/1024), centered, with
+    transparent padding around it. Without that padding our icon
+    looks ~25% larger than properly-padded macOS apps next to it
+    in the Dock and Cmd-Tab switcher."""
     img = Image.new("RGBA", (size, size))
     d = ImageDraw.Draw(img)
 
-    # Rounded-square background. ~17% radius matches the macOS Big
-    # Sur app-icon shape rounding.
-    radius = max(2, round(size * 0.17))
-    d.rounded_rectangle((0, 0, size - 1, size - 1),
-                        radius=radius, fill=NAVY)
+    # Inner artwork region, inset to match Apple's template.
+    art = round(size * 0.804)
+    inset = (size - art) // 2
 
-    # Helvetica Bold E with a smaller "²" superscript. The "²" sits
-    # at roughly half the E's cap height, top-aligned with the cap.
-    e_px = round(size * 0.78)
-    sup_px = round(size * 0.36)
+    # Rounded-square background sized to the inset region. ~17% of
+    # the artwork side gives the macOS Big Sur shape rounding.
+    radius = max(2, round(art * 0.17))
+    d.rounded_rectangle(
+        (inset, inset, inset + art - 1, inset + art - 1),
+        radius=radius, fill=NAVY)
+
+    # Helvetica Bold E with a smaller "²" superscript, sized to the
+    # artwork region (not the full canvas).
+    e_px = round(art * 0.78)
+    sup_px = round(art * 0.36)
     e_font = ImageFont.truetype(HELV, e_px, index=HELV_BOLD_INDEX)
     sup_font = ImageFont.truetype(HELV, sup_px, index=HELV_BOLD_INDEX)
 
@@ -47,14 +58,14 @@ def render(size: int) -> Image.Image:
     sup_bb = d.textbbox((0, 0), "2", font=sup_font)
     sw = sup_bb[2] - sup_bb[0]
 
-    gap = max(1, round(size * 0.03))
+    gap = max(1, round(art * 0.03))
     total_w = ew + gap + sw
-    x = (size - total_w) // 2 - e_bb[0]
-    y = (size - eh) // 2 - e_bb[1]
+    x = inset + (art - total_w) // 2 - e_bb[0]
+    y = inset + (art - eh) // 2 - e_bb[1]
     d.text((x, y), "E", font=e_font, fill="white")
 
     sx = x + ew + gap - sup_bb[0]
-    sy = y + e_bb[1] - sup_bb[1] - max(1, round(size * 0.025))
+    sy = y + e_bb[1] - sup_bb[1] - max(1, round(art * 0.025))
     d.text((sx, sy), "2", font=sup_font, fill="white")
     return img
 
