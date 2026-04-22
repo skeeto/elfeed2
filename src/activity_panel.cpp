@@ -65,58 +65,46 @@ static int64_t day_at(int64_t anchor, int col, int row)
     return (int64_t)mktime(&tm);
 }
 
-// Discrete 0–4 level for a count, with 0 reserved for empty days.
-// Log-compressed against the actual max so one really-busy day
-// genuinely pushes everything else toward the cooler end of the
-// ramp — that shape (one outlier day against background hum) is
-// interesting, not something to normalize away. Floor at 1 so
-// any nonzero count stays distinct from 0; cap at 4.
-static int level_for(int count, int max_c)
+static wxColour lerp_colour(wxColour a, wxColour b, double t)
 {
-    if (count <= 0) return 0;
-    if (max_c <= 1) return 4;
-    double t = std::log(1.0 + (double)count) /
-               std::log(1.0 + (double)max_c);
-    int level = (int)std::lround(t * 4.0);
-    if (level < 1) level = 1;
-    if (level > 4) level = 4;
-    return level;
+    if (t < 0) t = 0;
+    if (t > 1) t = 1;
+    return wxColour(
+        (unsigned char)(a.Red()   + (b.Red()   - a.Red())   * t),
+        (unsigned char)(a.Green() + (b.Green() - a.Green()) * t),
+        (unsigned char)(a.Blue()  + (b.Blue()  - a.Blue())  * t));
 }
 
-// Fixed five-stop palettes, one per theme. Hardcoded rather than
-// derived from wxSYS_COLOUR_HIGHLIGHT because the system highlight
-// is typically a midtone blue — lerping bg→highlight tops out
-// before we've used half the available dynamic range, which is
-// why adjacent levels read as "the same medium blue." These go
-// all the way to deep navy (light) / saturated cyan-blue (dark)
-// so all five levels are visually distinct at small cell sizes.
-static const wxColour light_palette[5] = {
-    wxColour(235, 237, 240),  // 0 — near-bg
-    wxColour(168, 201, 236),  // 1 — pale blue
-    wxColour( 88, 146, 210),  // 2 — medium
-    wxColour( 30,  92, 172),  // 3 — strong
-    wxColour(  8,  40, 102),  // 4 — deep navy
-};
-
-static const wxColour dark_palette[5] = {
-    wxColour( 22,  27,  34),  // 0 — near-bg
-    wxColour( 16,  56, 102),  // 1
-    wxColour( 38, 109, 180),  // 2
-    wxColour( 74, 163, 232),  // 3
-    wxColour(140, 208, 255),  // 4 — bright saturated
-};
-
-static wxColour colour_for_level(wxColour bg, int level)
+// Continuous color for a given (count, max_c). Two gradient
+// endpoints per theme (light/dark), log-compressed interpolation
+// against max. Going continuous rather than discretizing into N
+// fixed buckets gives the gradient more perceived dynamic range
+// on any distribution — bucketing meant typical days all rounded
+// to the same 1–2 levels even with a wide count spread.
+static wxColour colour_for_count(wxColour bg, int count, int max_c)
 {
-    // ITU-R BT.709 luma approximation on the window background.
-    // Less than half of full luminance → dark theme.
+    // Light theme: near-bg gray-blue → deep navy.
+    // Dark theme:  near-bg near-black → bright saturated blue.
+    // Selected by window-bg luminance (ITU-R BT.709 approximation).
     double luma = (0.2126 * bg.Red() +
                    0.7152 * bg.Green() +
                    0.0722 * bg.Blue()) / 255.0;
-    const wxColour *pal = luma < 0.5 ? dark_palette : light_palette;
-    if (level < 0) level = 0;
-    if (level > 4) level = 4;
-    return pal[level];
+    bool dark = luma < 0.5;
+    wxColour empty_c = dark ? wxColour(22, 27, 34)
+                            : wxColour(235, 237, 240);
+    wxColour peak_c  = dark ? wxColour(140, 208, 255)
+                            : wxColour(  8,  40, 102);
+
+    if (count <= 0) return empty_c;
+    if (max_c <= 1) return peak_c;
+
+    double t = std::log(1.0 + (double)count) /
+               std::log(1.0 + (double)max_c);
+    // Floor the minimum blend so a single-entry day is always
+    // clearly "lit" — without this, a lone count=1 against a
+    // max=500 outlier would blend back into empty_c and vanish.
+    if (t < 0.18) t = 0.18;
+    return lerp_colour(empty_c, peak_c, t);
 }
 
 void ActivityPanel::refresh()
@@ -239,8 +227,7 @@ void ActivityPanel::on_paint(wxPaintEvent &)
         if (d > today_start) continue;  // future cells stay blank
         auto it = counts_.find(d);
         int count = it != counts_.end() ? it->second : 0;
-        int level = level_for(count, max_count_);
-        dc.SetBrush(colour_for_level(bg, level));
+        dc.SetBrush(colour_for_count(bg, count, max_count_));
         dc.DrawRectangle(
             g.grid_x + col * (g.cell + g.gap),
             g.grid_y + row * (g.cell + g.gap),
