@@ -134,6 +134,11 @@ struct Elfeed {
     std::string default_filter = "@6-months-ago +unread";
     int max_connections = 16;
     int fetch_timeout = 30;
+    // Number of consecutive failures the download scheduler will
+    // tolerate before giving up on an item. Items at the cap stay
+    // in the queue (visible in the Downloads pane as "failed") so
+    // the user can right-click → Retry to reset and try again.
+    int max_download_failures = 5;
     // Single-letter filter presets (from the `preset` config directive).
     // Key is the ASCII letter the user pressed; value is the filter
     // string to apply. Populated by config_load.
@@ -278,6 +283,10 @@ void download_enqueue_http(Elfeed *app, const std::string &url,
 void download_tick(Elfeed *app);
 void download_remove(Elfeed *app, int id);
 void download_pause(Elfeed *app, int id);
+// Reset the failures counter on `id` and unpause it so the next
+// download_tick will reconsider it. No-op if `id` doesn't match an
+// item in the queue. Used by the Downloads pane's Retry action.
+void download_retry(Elfeed *app, int id);
 void download_stop(Elfeed *app);
 
 // Fetching

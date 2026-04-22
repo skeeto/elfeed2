@@ -43,9 +43,16 @@ public:
         }
         case 1: {
             // Status — what the % column used to show as words.
+            // "failed" wins when the scheduler has given up
+            // (failures past app->max_download_failures); the row
+            // stays in the queue but won't run again until the user
+            // chooses Retry from the right-click menu.
             wxString s;
             if (r.active)      s = wxT("downloading");
             else if (r.paused) s = wxT("paused");
+            else if (owner_->app_ &&
+                     r.failures >= owner_->app_->max_download_failures)
+                s = wxT("failed");
             else               s = wxT("queued");
             value = s;
             return;
@@ -294,6 +301,7 @@ void DownloadsPanel::on_context_menu(wxDataViewEvent &event)
 
     enum {
         ID_PauseToggle = wxID_HIGHEST + 1,
+        ID_Retry,
         ID_Remove,
         ID_CopyURL,
         ID_CopyDest,
@@ -309,6 +317,12 @@ void DownloadsPanel::on_context_menu(wxDataViewEvent &event)
 
     wxMenu menu;
     menu.Append(ID_PauseToggle, r.paused ? "&Resume" : "&Pause");
+    // Retry only when there's something to reset — failure counter
+    // > 0 covers both "scheduler gave up" rows and merely-flaky
+    // ones where the user wants to try again now without waiting
+    // for the next download_tick.
+    if (r.failures > 0)
+        menu.Append(ID_Retry,   "Re&try");
     menu.Append(ID_Remove,      "Re&move");
     menu.AppendSeparator();
     menu.Append(ID_CopyURL,     "Copy &URL");
@@ -327,6 +341,11 @@ void DownloadsPanel::on_context_menu(wxDataViewEvent &event)
     switch (choice) {
     case ID_PauseToggle:
         download_pause(app_, r.id);
+        refresh();
+        break;
+    case ID_Retry:
+        download_retry(app_, r.id);
+        download_tick(app_);  // immediate try; no waiting
         refresh();
         break;
     case ID_Remove:

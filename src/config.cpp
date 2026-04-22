@@ -242,6 +242,12 @@ void config_load(Elfeed *app)
             app->fetch_timeout = atoi(value_after_directive(line).c_str());
             continue;
         }
+        if (dir0 == "max-download-failures") {
+            int n = atoi(value_after_directive(line).c_str());
+            if (n < 1) n = 1;
+            app->max_download_failures = n;
+            continue;
+        }
 
         // --- stanza body (applies to current feed) -----------------
         if (dir0 == "title") {

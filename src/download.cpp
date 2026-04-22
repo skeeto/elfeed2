@@ -28,15 +28,17 @@
 #include <regex>
 #include <thread>
 
-// Find the next item to run: highest (priority - failures), not paused,
-// not over max failures (5).
-static DownloadItem *pick_next(std::vector<DownloadItem> &items)
+// Find the next item to run: highest (priority - failures), not
+// paused, and not at the configured failure cap. Items at the cap
+// stay in the queue (the Downloads pane shows them as "failed");
+// the user revives them via right-click → Retry.
+static DownloadItem *pick_next(Elfeed *app)
 {
     DownloadItem *best = nullptr;
     int best_score = -999;
-    for (auto &item : items) {
+    for (auto &item : app->downloads) {
         if (item.paused) continue;
-        if (item.failures >= 5) continue;
+        if (item.failures >= app->max_download_failures) continue;
         int score = item.priority - item.failures;
         if (!best || score > best_score) {
             best = &item;
@@ -338,7 +340,7 @@ void download_tick(Elfeed *app)
     if (app->download_active_id != 0) return;
     if (app->downloads.empty()) return;
 
-    DownloadItem *next = pick_next(app->downloads);
+    DownloadItem *next = pick_next(app);
     if (!next) return;
 
     if (next->kind == DownloadKind::HttpDirect) {
@@ -444,6 +446,16 @@ void download_pause(Elfeed *app, int id)
                 g_http->cancelled = true;
             }
         }
+        break;
+    }
+}
+
+void download_retry(Elfeed *app, int id)
+{
+    for (auto &d : app->downloads) {
+        if (d.id != id) continue;
+        d.failures = 0;
+        d.paused   = false;
         break;
     }
 }

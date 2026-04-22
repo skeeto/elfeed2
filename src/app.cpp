@@ -94,6 +94,7 @@ void config_reload(Elfeed *app)
     app->default_filter = "@6-months-ago +unread";
     app->max_connections = 16;
     app->fetch_timeout = 30;
+    app->max_download_failures = 5;
 
     config_load(app);
 
