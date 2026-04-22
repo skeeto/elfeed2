@@ -961,7 +961,20 @@ void MainFrame::on_list_key(wxKeyEvent &e)
     case 'R': if (plain) { action_mark_read();        return; } break;
     case 'B': if (plain) { action_open_in_browser();  return; } break;
     case 'Y': if (plain) { action_copy_link();        return; } break;
-    case 'D': if (plain) { action_download();         return; } break;
+    case 'D':
+        // Lowercase d: download the selected entries (per-entry
+        // path chosen in action_download). Capital D (Shift+D):
+        // toggle the Downloads panel so the user can watch
+        // progress. Pairs with 'd' mnemonically.
+        if (e.ShiftDown()) { toggle_pane("downloads"); return; }
+        if (plain)         { action_download();        return; }
+        break;
+    case 'L':
+        // Lowercase l: toggle the Log panel. Vim's `l` (move one
+        // character right) has no analog in our row-oriented list,
+        // so the key is free. Capital L is reserved for future use.
+        if (plain) { toggle_pane("log"); return; }
+        break;
     case 'F': if (plain) { fetch_all(app_); update_status(); return; } break;
     case 'V':
         // Visual-selection mode. Entering anchors at the focused

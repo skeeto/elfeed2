@@ -194,8 +194,9 @@ Age units: `year`/`y`, `month`/`M`, `week`/`w`, `day`/`d`, `hour`/`h`,
 | `Ctrl+A`    | Select all entries                       |
 | `s` / `/`   | Edit filter                              |
 | `f`         | Fetch all feeds                          |
-| `d`         | Download enclosure (via yt-dlp)          |
-| `D`         | Toggle downloads panel                   |
+| `d`         | Download enclosure                       |
+| `D`         | Toggle Downloads panel                   |
+| `l`         | Toggle Log panel                         |
 | `Escape`    | Clear selection                          |
 
 Visual selection (`v`) anchors at the focused row; subsequent `j`, `k`,
