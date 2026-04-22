@@ -362,7 +362,12 @@ void MainFrame::bind_events()
     Bind(wxEVT_MENU, &MainFrame::on_about, this, wxID_ABOUT);
     Bind(wxEVT_MENU, &MainFrame::on_quit,  this, wxID_EXIT);
     Bind(wxEVT_CLOSE_WINDOW, &MainFrame::on_close, this);
-    Bind(wxEVT_AUI_PANE_CLOSE, &MainFrame::on_pane_close, this);
+    // Bind on the manager, not on `this`: wxAuiManagerEvent inherits
+    // from wxEvent (not wxCommandEvent) so it doesn't propagate up
+    // to the frame. The previous frame-level bind silently never
+    // fired, which is why the View menu's check marks lagged the
+    // actual pane state after an X-button close.
+    mgr_.Bind(wxEVT_AUI_PANE_CLOSE, &MainFrame::on_pane_close, this);
     Bind(wxEVT_MOVE, &MainFrame::on_frame_move_size, this);
     Bind(wxEVT_SIZE, &MainFrame::on_frame_move_size, this);
 
