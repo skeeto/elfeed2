@@ -1059,6 +1059,17 @@ void MainFrame::on_detail_key(wxKeyEvent &e)
         case 'Y': action_copy_link();       return;
         case 'D': action_download();        return;
         case 'U': action_mark_unread();     return;
+        case 'R': action_mark_read();       return;
+        case 'J':
+            // j/k scroll the body by a line. n/p are the "navigate
+            // between entries" keys in reader mode, so j/k are free
+            // to mean what they do in any vi-ish pager: move the
+            // viewport, not the entry.
+            if (detail_) detail_->scroll_lines(+1);
+            return;
+        case 'K':
+            if (detail_) detail_->scroll_lines(-1);
+            return;
         }
     }
     if (try_preset_key(e)) return;

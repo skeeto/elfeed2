@@ -117,6 +117,16 @@ void EntryDetail::focus_body()
     if (body_) body_->SetFocus();
 }
 
+void EntryDetail::scroll_lines(int lines)
+{
+    // wxHtmlWindow inherits from wxScrolled, which exposes
+    // ScrollLines: positive = down, negative = up. A "line" here
+    // is the window's configured vertical scroll unit (pixels per
+    // unit), which wxHtmlWindow sets to roughly one text line on
+    // SetPage. That matches what vi users expect from j/k.
+    if (body_) body_->ScrollLines(lines);
+}
+
 void EntryDetail::show_entry(const Entry *e)
 {
     current_ = e;

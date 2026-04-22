@@ -33,6 +33,12 @@ public:
     // the user into reader mode.
     void focus_body();
 
+    // Scroll the HTML body by `lines` lines (negative = up). Called
+    // from MainFrame::on_detail_key for j/k in reader mode — the
+    // html window doesn't bind letter keys to scrolling, so we
+    // have to drive it explicitly.
+    void scroll_lines(int lines);
+
 private:
     void on_link_click(wxMouseEvent &);
     void render();  // rebuild HTML from current_ and push to body_

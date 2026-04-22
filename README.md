@@ -215,14 +215,15 @@ and then exits visual mode; `Escape` or `v` again also exits.
 
 ### Entry detail keys
 
-| Key     | Action                          |
-|---------|---------------------------------|
-| `q` / `Escape` | Return to listing        |
-| `n` / `p`      | Next / previous entry    |
-| `b`            | Open link in browser     |
-| `y`            | Copy link to clipboard   |
-| `d`            | Download enclosure       |
-| `u`            | Toggle unread            |
+| Key            | Action                        |
+|----------------|-------------------------------|
+| `q` / `Escape` | Return to listing             |
+| `j` / `k`      | Scroll body down / up         |
+| `n` / `p`      | Next / previous entry         |
+| `b`            | Open link in browser          |
+| `y`            | Copy link to clipboard        |
+| `d`            | Download enclosure            |
+| `r` / `u`      | Mark read / unread (advances) |
 
 ## Data
 
