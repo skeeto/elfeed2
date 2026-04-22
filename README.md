@@ -27,8 +27,9 @@ fetched automatically.
 The configuration file is at `$XDG_CONFIG_HOME/elfeed2/config` (typically
 `~/.config/elfeed2/config`) on all platforms. It is a line-oriented
 format inspired by `ssh_config`: directives are `keyword value`, blank
-lines are cosmetic, and comments start with `#` at the start of a
-line or preceded by whitespace.
+lines are cosmetic, and comments start with `#` at the start of a line
+or preceded by whitespace and followed by whitespace (so `#`-prefixed
+values like `#f9f` aren't mistaken for comments).
 
 ### Global settings
 
@@ -71,6 +72,20 @@ rest of the line:
 
     reddit cpp
       tag programming
+
+### Per-tag colors
+
+A `color TAG #RRGGBB` (or `#RGB` shorthand) directive tints entries
+in the listing whose tag list includes `TAG`. The first directive
+whose tag matches a given entry wins, so order them by priority.
+
+    color youtube #ff99ff
+    color news    #88c0d0
+    color hn      #d08770
+
+Foreground only (not background), applied on top of the default styling
+including bold for unread entries. Stored only in config — not
+persisted to the database.
 
 ### Filter presets
 

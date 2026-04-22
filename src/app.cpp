@@ -87,6 +87,7 @@ void config_reload(Elfeed *app)
     // ytdlp_args (which accumulates) would grow on every reload.
     app->feeds.clear();
     app->presets.clear();
+    app->tag_colors.clear();
     app->download_dir.clear();
     app->ytdlp_program = "yt-dlp";
     app->ytdlp_args.clear();

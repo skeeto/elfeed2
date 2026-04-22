@@ -139,6 +139,14 @@ struct Elfeed {
     // string to apply. Populated by config_load.
     std::unordered_map<char, std::string> presets;
 
+    // Per-tag entry-list foreground colors (from the `color`
+    // directive). Stored in config order so first-match-wins is
+    // explicit: walked in order, the first tag we recognize on an
+    // entry sets that entry's row colour. Color is packed 0xRRGGBB
+    // — wxColour built at render time so this header stays free of
+    // wxWidgets dependencies.
+    std::vector<std::pair<std::string, uint32_t>> tag_colors;
+
     // Current view (populated by db_query_entries after filter changes)
     std::vector<Entry> entries;
     Filter current_filter;

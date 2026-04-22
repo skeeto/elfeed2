@@ -197,12 +197,28 @@ public:
                       wxDataViewItemAttr &attr) const override
     {
         if (row >= app_->entries.size()) return false;
-        if (has_tag(app_->entries[row], "unread")) {
+        const Entry &e = app_->entries[row];
+        bool used = false;
+        if (has_tag(e, "unread")) {
             attr.SetBold(true);
-            return true;
+            used = true;
         }
-        // Read entries get the default style (no attribute).
-        return false;
+        // First-match-wins per `color TAG #RGB` directives. Walked
+        // in config order so the user controls priority by stanza
+        // sequence; duplicate `color` entries for the same tag let
+        // the earliest definition win.
+        for (auto &tc : app_->tag_colors) {
+            if (has_tag(e, tc.first.c_str())) {
+                uint32_t c = tc.second;
+                attr.SetColour(wxColour(
+                    (unsigned char)((c >> 16) & 0xFF),
+                    (unsigned char)((c >> 8)  & 0xFF),
+                    (unsigned char)( c        & 0xFF)));
+                used = true;
+                break;
+            }
+        }
+        return used;
     }
 
 private:

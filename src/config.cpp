@@ -44,11 +44,19 @@ std::string trim(const std::string &s)
 
 std::string strip_comment(const std::string &line)
 {
+    // A `#` starts a comment iff it's at line start OR preceded by
+    // whitespace AND followed by whitespace or end-of-line. That
+    // catches the common `key value  # description` pattern but
+    // leaves `#`-prefixed values alone — notably hex colors like
+    // `#f9f` in the `color` directive, which are values, not
+    // comments. Token-internal `#` (e.g. inside a URL fragment) is
+    // already excluded by the preceding-whitespace requirement.
     for (size_t i = 0; i < line.size(); i++) {
-        if (line[i] == '#' &&
-            (i == 0 || std::isspace((unsigned char)line[i - 1]))) {
-            return line.substr(0, i);
-        }
+        if (line[i] != '#') continue;
+        if (i > 0 && !std::isspace((unsigned char)line[i - 1])) continue;
+        if (i + 1 < line.size() &&
+            !std::isspace((unsigned char)line[i + 1])) continue;
+        return line.substr(0, i);
     }
     return line;
 }
@@ -100,6 +108,40 @@ bool is_url(const std::string &s)
     return s.find("://") != std::string::npos;
 }
 
+// Parse "#RRGGBB" or "#RGB" into packed 0x00RRGGBB. Returns -1 on
+// malformed input (caller emits a warning). The shorthand expands
+// each digit by duplication: "#abc" -> 0xAABBCC, matching the CSS
+// rule so users don't have to think about it.
+int64_t parse_hex_color(const std::string &s)
+{
+    auto hex = [](char c) -> int {
+        if (c >= '0' && c <= '9') return c - '0';
+        if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+        if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+        return -1;
+    };
+    if (s.empty() || s[0] != '#') return -1;
+    if (s.size() == 7) {
+        uint32_t r = 0;
+        for (int i = 1; i < 7; i++) {
+            int d = hex(s[i]);
+            if (d < 0) return -1;
+            r = (r << 4) | (uint32_t)d;
+        }
+        return (int64_t)r;
+    }
+    if (s.size() == 4) {
+        uint32_t r = 0;
+        for (int i = 1; i < 4; i++) {
+            int d = hex(s[i]);
+            if (d < 0) return -1;
+            r = (r << 8) | (uint32_t)((d << 4) | d);
+        }
+        return (int64_t)r;
+    }
+    return -1;
+}
+
 } // namespace
 
 void config_load(Elfeed *app)
@@ -140,6 +182,24 @@ void config_load(Elfeed *app)
                 continue;
             }
             aliases[tokens[1]] = tokens[2];
+            continue;
+        }
+
+        // --- per-tag entry-list color ------------------------------
+        if (dir0 == "color") {
+            if (tokens.size() < 3) {
+                warn("color needs a tag and a #RRGGBB or #RGB hex", ln);
+                continue;
+            }
+            int64_t rgb = parse_hex_color(tokens[2]);
+            if (rgb < 0) {
+                warn("color must be #RRGGBB or #RGB: " + tokens[2], ln);
+                continue;
+            }
+            // Append rather than upsert: first-match-wins is the
+            // documented rule, and duplicate entries for the same
+            // tag are harmless (later ones never get reached).
+            app->tag_colors.push_back({tokens[1], (uint32_t)rgb});
             continue;
         }
 
