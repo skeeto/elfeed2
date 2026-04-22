@@ -57,6 +57,15 @@ EntryDetail::EntryDetail(wxWindow *parent, Elfeed *app)
 
     body_ = new wxHtmlWindow(this, wxID_ANY, wxDefaultPosition, wxDefaultSize,
                              wxHW_SCROLLBAR_AUTO);
+    // wxHtmlWindow's default link behavior is to navigate (load the
+    // URL as a new HTML page in this same control), which fails for
+    // http(s) since we don't register an internet FS handler — and
+    // even if we did, in-pane navigation isn't what users want.
+    // Route every link click to the system default browser.
+    body_->Bind(wxEVT_HTML_LINK_CLICKED,
+                [](wxHtmlLinkEvent &e) {
+                    wxLaunchDefaultBrowser(e.GetLinkInfo().GetHref());
+                });
 
     auto *sz = new wxBoxSizer(wxVERTICAL);
     int pad = FromDIP(6);
