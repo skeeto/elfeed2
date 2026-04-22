@@ -67,7 +67,7 @@ preset h             @1-month +unread
 # rest of the line.
 
 alias youtube        https://www.youtube.com/feeds/videos.xml?channel_id={}
-alias reddit         https://www.reddit.com/r/{}/.rss
+alias reddit         https://old.reddit.com/r/{}/.rss
 
 # ---- Feeds --------------------------------------------------------
 # Any line with `://` is a URL stanza head. Lines after it apply to
