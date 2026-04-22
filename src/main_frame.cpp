@@ -868,26 +868,28 @@ void MainFrame::on_list_key(wxKeyEvent &e)
         break;
     }
 
-    // User-defined filter presets bound to single keys via the `preset`
-    // config directive. Built-in keys above take precedence, so users
-    // can't override j/k/u/r/etc. — but any other printable ASCII
-    // (letters, digits, punctuation) is fair game. Shift turns e.g.
-    // 'h' into 'H', so both case variants can be bound independently.
-    if (!e.ControlDown() && !e.AltDown() && !e.MetaDown() &&
-        code >= 0x20 && code < 0x7F) {
-        char c = (char)code;
-        // wxKeyEvent reports letter codes in uppercase; map to lowercase
-        // when Shift isn't held so `preset h` matches a plain `h` press.
-        if (!e.ShiftDown() && c >= 'A' && c <= 'Z')
-            c = (char)(c - 'A' + 'a');
-        auto it = app_->presets.find(c);
-        if (it != app_->presets.end()) {
-            apply_filter(it->second);
-            return;
-        }
-    }
+    if (try_preset_key(e)) return;
 
     e.Skip();
+}
+
+bool MainFrame::try_preset_key(wxKeyEvent &e)
+{
+    // User-defined filter presets bound to single letters via the
+    // `preset` config directive. Skip when modifiers are held —
+    // those are reserved for native shortcuts (Ctrl+W, Cmd+Q, …).
+    // Shift counts as "case modifier" for letters: `preset H` and
+    // `preset h` are independently bindable.
+    if (e.ControlDown() || e.AltDown() || e.MetaDown()) return false;
+    int code = e.GetKeyCode();
+    if (code < 0x20 || code >= 0x7F) return false;
+    char c = (char)code;
+    if (!e.ShiftDown() && c >= 'A' && c <= 'Z')
+        c = (char)(c - 'A' + 'a');
+    auto it = app_->presets.find(c);
+    if (it == app_->presets.end()) return false;
+    apply_filter(it->second);
+    return true;
 }
 
 void MainFrame::on_filter_key(wxKeyEvent &e)

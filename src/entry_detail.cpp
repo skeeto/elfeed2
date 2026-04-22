@@ -1,5 +1,6 @@
 #include "entry_detail.hpp"
 #include "image_cache.hpp"
+#include "main_frame.hpp"
 #include "util.hpp"
 
 #include <wx/cursor.h>
@@ -66,6 +67,18 @@ EntryDetail::EntryDetail(wxWindow *parent, Elfeed *app)
                 [](wxHtmlLinkEvent &e) {
                     wxLaunchDefaultBrowser(e.GetLinkInfo().GetHref());
                 });
+    // Forward unhandled key presses to the main frame's preset
+    // dispatcher so the same one-letter `preset` keys work while
+    // reading an entry. wxEVT_CHAR_HOOK fires before the html
+    // window's own key handling, so letters that don't match a
+    // preset still scroll/select normally via Skip.
+    body_->Bind(wxEVT_CHAR_HOOK, [this](wxKeyEvent &e) {
+        if (auto *frame =
+                dynamic_cast<MainFrame *>(wxGetTopLevelParent(this))) {
+            if (frame->try_preset_key(e)) return;
+        }
+        e.Skip();
+    });
 
     auto *sz = new wxBoxSizer(wxVERTICAL);
     int pad = FromDIP(6);

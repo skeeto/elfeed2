@@ -256,6 +256,13 @@ void FeedsPanel::on_key(wxKeyEvent &e)
         }
         return;
     }
+    // Fall through to the main frame's preset dispatch so user
+    // `preset` keys work even when this panel has focus. If no
+    // preset matches, the event continues to default handlers
+    // via Skip below.
+    if (auto *frame = dynamic_cast<MainFrame *>(wxGetTopLevelParent(this))) {
+        if (frame->try_preset_key(e)) return;
+    }
     e.Skip();
 }
 

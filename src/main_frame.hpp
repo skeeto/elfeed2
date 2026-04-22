@@ -31,6 +31,15 @@ public:
     // wxGetTopLevelParent.
     void flash_status(const wxString &msg);
 
+    // Try to dispatch `e` as a single-letter filter preset (from
+    // the `preset` config directive). Returns true if matched and
+    // applied — caller should not call e.Skip(). Returns false if
+    // the key isn't a preset trigger; caller should fall through.
+    // Used by panels other than the entry list (FeedsPanel,
+    // EntryDetail) so preset keys work even when their focus is
+    // elsewhere in the app.
+    bool try_preset_key(wxKeyEvent &e);
+
 private:
     // ---- Building ----
     void build_menus();
