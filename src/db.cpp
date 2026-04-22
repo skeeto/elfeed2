@@ -499,15 +499,76 @@ void db_query_entries(Elfeed *app, const Filter &filter,
     if (!app->db) return;
     out.clear();
 
-    // Build query: date range goes into SQL, regex filters applied in memory
+    // Classify bare/! patterns: simple alnum+underscore words go
+    // through FTS5 (fast, index-backed, also searches content);
+    // patterns with regex metacharacters fall through to the
+    // in-memory regex path (same behavior as before FTS landed).
+    // A single "c++ #1w"-style filter thus still works: the `c++`
+    // goes in-memory, nothing goes to FTS, everything else
+    // (date, tags, limit) is unchanged.
+    auto is_fts_simple = [](const std::string &p) {
+        if (p.empty()) return false;
+        for (char c : p) {
+            if (!(std::isalnum((unsigned char)c) || c == '_'))
+                return false;
+        }
+        return true;
+    };
+    std::string fts_match;
+    std::vector<std::string> regex_matches;
+    std::vector<std::string> regex_not_matches;
+    for (auto &p : filter.matches) {
+        if (is_fts_simple(p)) {
+            if (!fts_match.empty()) fts_match += " ";
+            fts_match += "\"";
+            fts_match += p;
+            fts_match += "\"";
+        } else {
+            regex_matches.push_back(p);
+        }
+    }
+    if (!fts_match.empty()) {
+        // FTS5 rejects a bare-NOT expression (there has to be at
+        // least one positive match to exclude from), so only push
+        // simple !patterns through FTS when we also have an
+        // anchor match. Otherwise let them go through in-memory.
+        for (auto &p : filter.not_matches) {
+            if (is_fts_simple(p)) {
+                fts_match += " NOT \"";
+                fts_match += p;
+                fts_match += "\"";
+            } else {
+                regex_not_matches.push_back(p);
+            }
+        }
+    } else {
+        for (auto &p : filter.not_matches)
+            regex_not_matches.push_back(p);
+    }
+    bool use_fts = !fts_match.empty();
+
+    // Build query: FTS MATCH + date range + tag filters go into
+    // SQL. Regex/substring filters (leftover complex patterns,
+    // and feed-URL = / ~) apply in the C++ scan below.
     std::string sql =
         "SELECT e.namespace, e.id, e.feed_url, e.title, e.link, e.date,"
         " e.content, e.content_type"
         " FROM entry e";
+    if (use_fts) {
+        // The rowid JOIN uses idx on entry_fts.rowid implicit PK;
+        // MATCH narrows to matching rows before the entry scan
+        // ever touches them.
+        sql += " JOIN entry_fts fts ON fts.rowid = e.rowid";
+    }
 
     std::vector<std::string> where;
     std::vector<double> bind_doubles;
 
+    // FTS MATCH goes first in the WHERE so the planner uses the
+    // full-text index as the driving table.
+    if (use_fts) {
+        where.push_back("entry_fts MATCH ?");
+    }
     if (filter.after > 0) {
         double cutoff = (double)time(nullptr) - filter.after;
         where.push_back("e.date >= ?");
@@ -559,7 +620,14 @@ void db_query_entries(Elfeed *app, const Filter &filter,
     if (sqlite3_prepare_v2(app->db, sql.c_str(), -1, &stmt, nullptr) != SQLITE_OK)
         return;
 
+    // Bind order matches WHERE order: FTS MATCH (if any), then
+    // date bounds. Tag filters are interpolated into SQL text
+    // (not bound parameters) so they don't consume a bind slot.
     int bind_idx = 1;
+    if (use_fts) {
+        sqlite3_bind_text(stmt, bind_idx++, fts_match.c_str(),
+                          -1, SQLITE_TRANSIENT);
+    }
     for (double d : bind_doubles)
         sqlite3_bind_double(stmt, bind_idx++, d);
 
@@ -592,8 +660,10 @@ void db_query_entries(Elfeed *app, const Filter &filter,
         }
         return out;
     };
-    std::vector<Matcher> match_matchers     = build_matchers(filter.matches);
-    std::vector<Matcher> not_match_matchers = build_matchers(filter.not_matches);
+    // Only complex (non-FTS) patterns reach the in-memory matcher
+    // — simple words were already matched in SQL via FTS.
+    std::vector<Matcher> match_matchers     = build_matchers(regex_matches);
+    std::vector<Matcher> not_match_matchers = build_matchers(regex_not_matches);
     auto matches_in = [](const Matcher &m,
                          const std::string &title,
                          const std::string &link) {
