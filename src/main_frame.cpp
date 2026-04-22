@@ -138,11 +138,13 @@ MainFrame::MainFrame(Elfeed *app)
 
     // One-shot debounce for filter-bar typing. on_filter_text starts
     // it; when the user pauses for ~180 ms, this fires the actual
-    // requery. Enter/Escape/focus-out paths stop the timer and
-    // call commit_filter() directly for immediate feedback.
+    // requery with the viewport cap applied (live-typing mode).
+    // Enter/Escape/focus-out paths stop the timer and call
+    // commit_filter(/*capped=*/false) instead, so leaving the
+    // filter bar always produces the full uncapped match set.
     filter_debounce_.SetOwner(this);
     Bind(wxEVT_TIMER,
-         [this](wxTimerEvent &) { commit_filter(); },
+         [this](wxTimerEvent &) { commit_filter(/*capped=*/true); },
          filter_debounce_.GetId());
 
     // Focus the entry list so vi-style keys work immediately.
@@ -379,13 +381,13 @@ void MainFrame::bind_events()
     // Persist the current filter text when the user leaves the filter
     // control (blur), so it's remembered across runs.
     filter_->Bind(wxEVT_KILL_FOCUS, [this](wxFocusEvent &e) {
-        // Flush any debounced edit so leaving the control
-        // applies what the user just typed (rather than leaving
-        // the listing out of sync with the visible filter text).
-        if (filter_debounce_.IsRunning()) {
-            filter_debounce_.Stop();
-            commit_filter();
-        }
+        // Leaving the filter bar: drop the live-typing row cap
+        // and show the full match set. Stop any pending debounce
+        // first (its in-flight commit would have been capped);
+        // then commit uncapped. Stop() is a no-op if the timer
+        // isn't running, so just always call it.
+        filter_debounce_.Stop();
+        commit_filter(/*capped=*/false);
         db_save_ui_state(app_, "filter",
                          filter_->GetValue().utf8_string().c_str());
         e.Skip();
@@ -402,7 +404,7 @@ void MainFrame::bind_events()
 
 // ---- Data plumbing -------------------------------------------------
 
-void MainFrame::requery()
+void MainFrame::requery(int default_limit)
 {
     // Row indices are about to change; the old anchor no longer
     // points to the same entry. Exit visual mode silently — the
@@ -416,11 +418,12 @@ void MainFrame::requery()
         sel_id = app_->entries[(size_t)primary].id;
     }
 
-    // Cap the query at viewport-plus-scroll-buffer rows by default
-    // so a live filter keystroke doesn't walk the whole history.
-    // An explicit #N in the filter string still overrides.
+    // Caller decides whether to apply a default row cap. Live-
+    // typing passes the viewport size; everything else (blur,
+    // Ctrl+L, import, fetch arrival, preset keys) passes 0 for
+    // the full match set.
     db_query_entries(app_, app_->current_filter, app_->entries,
-                     list_->desired_row_count());
+                     default_limit);
     list_->refresh_items();
     // Note: activity_ is filter-independent, driven by the DB
     // directly, so a requery (which runs on every filter keystroke)
@@ -592,11 +595,11 @@ void MainFrame::on_filter_text(wxCommandEvent &)
     filter_debounce_.StartOnce(180);
 }
 
-void MainFrame::commit_filter()
+void MainFrame::commit_filter(bool capped)
 {
     std::string text = filter_->GetValue().utf8_string();
     app_->current_filter = filter_parse(text);
-    requery();
+    requery(capped ? list_->desired_row_count() : 0);
     update_status();
 }
 
@@ -1142,13 +1145,12 @@ void MainFrame::on_filter_key(wxKeyEvent &e)
 {
     int code = e.GetKeyCode();
     if (code == WXK_ESCAPE || code == WXK_RETURN || code == WXK_NUMPAD_ENTER) {
-        // Flush any pending debounced filter edit so leaving the
-        // control commits what the user just typed — otherwise
-        // Enter could land in the list before the requery runs.
-        if (filter_debounce_.IsRunning()) {
-            filter_debounce_.Stop();
-            commit_filter();
-        }
+        // Stop any pending debounced edit; the KILL_FOCUS handler
+        // fires as we set focus away and does the final uncapped
+        // commit, so we don't do one here. (Doing it here would
+        // be a capped commit immediately followed by an uncapped
+        // one from KILL_FOCUS — wasteful.)
+        filter_debounce_.Stop();
         list_->SetFocus();
         return;
     }

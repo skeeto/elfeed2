@@ -56,7 +56,11 @@ private:
     void bind_events();
 
     // ---- Data plumbing ----
-    void requery();
+    // `default_limit > 0` caps result rows; used by the debounced
+    // typing path to bound live-filter work to one viewport. Other
+    // paths (import, Ctrl+L, fetch-arrival, blur) pass 0 for a
+    // full-fidelity requery.
+    void requery(int default_limit = 0);
     void update_status();
     void update_menu_checks();
 
@@ -66,9 +70,11 @@ private:
     void apply_filter(const std::string &text);
 
     // Re-parse whatever's currently in the filter bar and requery.
-    // Fires from the debounce timer on typing-paused, and from the
-    // Enter/Escape/focus-out paths that flush a pending commit.
-    void commit_filter();
+    // `capped=true` (the debounce-timer path) applies the viewport
+    // row cap for live-typing responsiveness; `capped=false` (blur
+    // path) runs a full-fidelity query so leaving the filter bar
+    // always shows the complete match set.
+    void commit_filter(bool capped = false);
 
     // ---- Selection helpers ----
     void move_selection(int delta);
