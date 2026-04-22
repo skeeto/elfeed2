@@ -555,22 +555,26 @@ void db_query_entries(Elfeed *app, const Filter &filter,
         " e.content, e.content_type"
         " FROM entry e";
     if (use_fts) {
-        // The rowid JOIN uses idx on entry_fts.rowid implicit PK;
+        // The rowid JOIN uses the implicit PK on entry_fts.rowid;
         // MATCH narrows to matching rows before the entry scan
-        // ever touches them.
-        sql += " JOIN entry_fts fts ON fts.rowid = e.rowid";
+        // ever touches them. Note: we deliberately don't alias
+        // entry_fts here — FTS5's MATCH operator resolves its
+        // left-hand side as either a table name or a column name,
+        // and an alias loses against "column on entry_fts" in
+        // that resolution. Keeping the full table name lets
+        // `entry_fts MATCH ?` parse as the table-wide match.
+        sql += " JOIN entry_fts ON entry_fts.rowid = e.rowid";
     }
 
     std::vector<std::string> where;
     std::vector<double> bind_doubles;
 
     // FTS MATCH goes first in the WHERE so the planner uses the
-    // full-text index as the driving table. Reference the alias
-    // we set in the JOIN (`fts`), not the bare table name: with
-    // the alias in scope, `entry_fts MATCH ?` can fail SQL name
-    // resolution depending on the SQLite version.
+    // full-text index as the driving table. Bare table name is
+    // required on the LHS — see the comment on the JOIN above
+    // for why an alias doesn't work here.
     if (use_fts) {
-        where.push_back("fts MATCH ?");
+        where.push_back("entry_fts MATCH ?");
     }
     if (filter.after > 0) {
         double cutoff = (double)time(nullptr) - filter.after;
