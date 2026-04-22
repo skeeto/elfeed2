@@ -12,10 +12,24 @@
 
 if(DEPS STREQUAL "LOCAL")
   find_path(HTTPLIB_INCLUDE_DIR httplib.h REQUIRED)
+  # Distros (Debian, Ubuntu) ship cpp-httplib in split mode: the
+  # header declares the API, the implementation lives in a
+  # separate libhttplib.so we have to link. find_library may
+  # return NOTFOUND on systems that ship header-only — that's
+  # also valid; in that case we mark CPPHTTPLIB_HEADER_ONLY so
+  # the header inlines its definitions in our TU.
+  find_library(HTTPLIB_LIBRARY httplib)
   if(NOT TARGET cpp-httplib)
     add_library(cpp-httplib INTERFACE)
     target_include_directories(cpp-httplib INTERFACE
       "${HTTPLIB_INCLUDE_DIR}")
+    if(HTTPLIB_LIBRARY)
+      target_link_libraries(cpp-httplib INTERFACE
+        "${HTTPLIB_LIBRARY}")
+    else()
+      target_compile_definitions(cpp-httplib INTERFACE
+        CPPHTTPLIB_HEADER_ONLY)
+    endif()
   endif()
   return()
 endif()
