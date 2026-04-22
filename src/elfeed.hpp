@@ -239,6 +239,12 @@ void db_close(Elfeed *app);
 void db_add_entries(Elfeed *app, std::vector<Entry> &entries);
 void db_query_entries(Elfeed *app, const Filter &filter,
                       std::vector<Entry> &out);
+// Pull just the `date` column for every entry with `date >= since`,
+// unfiltered by anything else. Used by the Activity panel, which
+// shows a whole-history cadence independent of the listing filter.
+// `out` is not sorted; callers that need time order should sort.
+void db_entry_dates_since(Elfeed *app, double since,
+                          std::vector<double> &out);
 void db_tag(Elfeed *app, const std::string &ns, const std::string &id,
             const std::string &tag);
 void db_untag(Elfeed *app, const std::string &ns, const std::string &id,

@@ -666,6 +666,23 @@ void db_query_entries(Elfeed *app, const Filter &filter,
     sqlite3_finalize(stmt);
 }
 
+void db_entry_dates_since(Elfeed *app, double since,
+                          std::vector<double> &out)
+{
+    out.clear();
+    if (!app->db) return;
+    sqlite3_stmt *stmt;
+    // Just the date column — no joins to tag/author/enclosure, and
+    // no deserialization of entry content. Fast even at 100k rows.
+    if (sqlite3_prepare_v2(app->db,
+            "SELECT date FROM entry WHERE date >= ?",
+            -1, &stmt, nullptr) != SQLITE_OK) return;
+    sqlite3_bind_double(stmt, 1, since);
+    while (sqlite3_step(stmt) == SQLITE_ROW)
+        out.push_back(sqlite3_column_double(stmt, 0));
+    sqlite3_finalize(stmt);
+}
+
 void db_tag(Elfeed *app, const std::string &ns, const std::string &id,
             const std::string &tag)
 {

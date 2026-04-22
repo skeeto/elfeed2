@@ -300,11 +300,10 @@ void MainFrame::build_widgets()
                      .Caption("Activity")
                      .Bottom()
                      .Layer(0)
-                     // Sized to fit two year-block rows of the
-                     // heatmap (7 × ~12 px cell + year label,
-                     // times two) without clipping. Users can
-                     // still drag taller to see deeper history.
-                     .MinSize(FromDIP(wxSize(-1, 200)))
+                     // One 53×7 heatmap grid plus month-label and
+                     // day-label strips. ~130 px holds it cleanly
+                     // at a reasonable cell size; resize to taste.
+                     .MinSize(FromDIP(wxSize(-1, 150)))
                      .Hide());
 
     // Run an initial Update with just the construction-time defaults
