@@ -71,7 +71,7 @@ localhost with optional latency and failure injection:
     python3 tests/fakefeeds.py --feeds 100 --print-config > /tmp/test.conf
     elfeed2 --db /tmp/test.db --config /tmp/test.conf
 
-Press `G` inside the test instance to trigger a parallel fetch and
+Press `f` inside the test instance to trigger a parallel fetch and
 watch the Log + Downloads panels under load.
 
 ## Configuration

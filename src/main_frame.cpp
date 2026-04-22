@@ -919,21 +919,11 @@ void MainFrame::on_list_key(wxKeyEvent &e)
     case 'J': if (plain) { move_selection(+1); return; } break;
     case 'K': if (plain) { move_selection(-1); return; } break;
     case 'G':
-        // Lowercase g jumps to the top of the list. Capital G
-        // (Shift+G) triggers Fetch All — original Elfeed reserves
-        // shifted letters for "expensive" actions, and a network
-        // roundtrip over every feed definitely qualifies. We drop
-        // the vi-style "G = bottom of list" binding: scrolling to
-        // the end of a chronological feed view isn't a frequent
-        // enough action to fight the Elfeed muscle memory.
-        if (e.ShiftDown()) {
-            fetch_all(app_);
-            update_status();
-        } else if (plain) {
+        if (e.ShiftDown())
+            go_to((long)app_->entries.size() - 1);
+        else if (plain)
             go_to(0);
-        } else {
-            break;
-        }
+        else break;
         return;
     case 'U': if (plain) { action_mark_unread();      return; } break;
     case 'R': if (plain) { action_mark_read();        return; } break;
