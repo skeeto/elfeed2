@@ -245,6 +245,13 @@ void db_query_entries(Elfeed *app, const Filter &filter,
 // `out` is not sorted; callers that need time order should sort.
 void db_entry_dates_since(Elfeed *app, double since,
                           std::vector<double> &out);
+// Newest entry date per feed_url, aggregated across the entry table.
+// Used by the Feeds panel to surface "last new content" rather than
+// "last fetch time" — a feed that was polled this morning but
+// hasn't published in six months reads the same both ways only by
+// coincidence. Feeds with zero entries are absent from the map.
+void db_feed_newest_entry_dates(
+    Elfeed *app, std::unordered_map<std::string, double> &out);
 void db_tag(Elfeed *app, const std::string &ns, const std::string &id,
             const std::string &tag);
 void db_untag(Elfeed *app, const std::string &ns, const std::string &id,

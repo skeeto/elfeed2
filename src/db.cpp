@@ -683,6 +683,25 @@ void db_entry_dates_since(Elfeed *app, double since,
     sqlite3_finalize(stmt);
 }
 
+void db_feed_newest_entry_dates(
+    Elfeed *app, std::unordered_map<std::string, double> &out)
+{
+    out.clear();
+    if (!app->db) return;
+    sqlite3_stmt *stmt;
+    // GROUP BY feed_url with MAX(date) — idx_entry_feed on feed_url
+    // lets SQLite walk one row per distinct feed to find each max,
+    // so this is roughly O(feed_count), not O(entry_count).
+    if (sqlite3_prepare_v2(app->db,
+            "SELECT feed_url, MAX(date) FROM entry GROUP BY feed_url",
+            -1, &stmt, nullptr) != SQLITE_OK) return;
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        auto *u = (const char *)sqlite3_column_text(stmt, 0);
+        if (u) out[u] = sqlite3_column_double(stmt, 1);
+    }
+    sqlite3_finalize(stmt);
+}
+
 void db_tag(Elfeed *app, const std::string &ns, const std::string &id,
             const std::string &tag)
 {

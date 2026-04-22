@@ -319,7 +319,14 @@ void FeedsPanel::refresh()
     // Snapshot (url, display title) pairs in display order. Display
     // title comes from the DB-backed map (which honors user_title
     // overrides), with a fallback to the raw URL for feeds that
-    // haven't been fetched yet.
+    // haven't been fetched yet. The Updated column shows the date
+    // of the feed's newest entry (not the last fetch time) so the
+    // user can spot feeds that have gone quiet — a feed polled
+    // today but with no new entries in six months reads very
+    // differently under the two interpretations.
+    std::unordered_map<std::string, double> newest;
+    db_feed_newest_entry_dates(app_, newest);
+
     rows_.clear();
     rows_.reserve(app_->feeds.size());
     for (auto &f : app_->feeds) {
@@ -327,13 +334,16 @@ void FeedsPanel::refresh()
         r.url = f.url;
         auto it = app_->feed_titles.find(f.url);
         r.title = (it != app_->feed_titles.end()) ? it->second : f.url;
-        // Only surface canonical_url when it actually differs from
-        // the configured URL — avoids redundant "redirects to
-        // itself" noise on feeds where canonical_url got saved
-        // pre-change or matches for unrelated reasons.
         if (!f.canonical_url.empty() && f.canonical_url != f.url)
             r.canonical_url = f.canonical_url;
-        r.updated = f.last_update;
+        // Prefer the newest-entry date at the configured URL. Fall
+        // back to the canonical URL — after a feed redirects we save
+        // new entries keyed by canonical_url, so a recently-migrated
+        // feed's entries aren't findable at the configured URL.
+        auto nit = newest.find(f.url);
+        if (nit == newest.end() && !f.canonical_url.empty())
+            nit = newest.find(f.canonical_url);
+        r.updated = (nit != newest.end()) ? nit->second : 0.0;
         rows_.push_back(std::move(r));
     }
 
