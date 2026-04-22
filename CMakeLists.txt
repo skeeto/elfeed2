@@ -1,9 +1,28 @@
 cmake_minimum_required(VERSION 3.25)
 project(elfeed2 VERSION 0.1.0 LANGUAGES C CXX)
 
-# Local CMake modules (FetchContentBundled, future helpers).
+# Local CMake modules (helpers + per-dep Fetch<X>.cmake files).
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(FetchContentBundled)
+
+# Where to obtain dependencies:
+#   FETCH (default) — pull pinned versions via FetchContent. Hermetic
+#                     and reproducible; the recommended path for end-
+#                     user builds, the macOS bundle, and the mingw
+#                     cross binary.
+#   LOCAL           — find system-installed libraries via find_*.
+#                     The right call for distribution packagers
+#                     (Debian, Fedora, Homebrew, …) who want their
+#                     own shared-lib versions.
+#
+# Both paths produce identically-named imported/built targets so the
+# rest of this file doesn't branch on DEPS.
+set(DEPS "FETCH" CACHE STRING
+    "Where to obtain dependencies: FETCH or LOCAL")
+set_property(CACHE DEPS PROPERTY STRINGS FETCH LOCAL)
+if(NOT DEPS MATCHES "^(FETCH|LOCAL)$")
+  message(FATAL_ERROR "DEPS must be FETCH or LOCAL (got '${DEPS}')")
+endif()
 
 # Route compiler invocations through ccache when available. Speeds up
 # clean rebuilds (including wxWidgets and friends, which are a lot of
@@ -33,97 +52,32 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 include(FetchContent)
 set(FETCHCONTENT_QUIET ON)
 
-# --- wxWidgets ---
+# Per-dep fetch / find. Each Fetch<X>.cmake handles both DEPS modes
+# and produces the same target names (sqlite3, pugixml, wx::core,
+# wx::base, wx::html, wx::aui, mbedtls, mbedx509, mbedcrypto,
+# cpp-httplib) so this file doesn't branch on DEPS.
+include(FetchWxWidgets)
 
-fetch_content_bundled(wxWidgets wxWidgets)
-
-set(wxBUILD_SHARED  OFF CACHE BOOL "" FORCE)
-set(wxBUILD_TESTS   OFF CACHE BOOL "" FORCE)
-set(wxBUILD_SAMPLES OFF CACHE BOOL "" FORCE)
-set(wxBUILD_DEMOS   OFF CACHE BOOL "" FORCE)
-set(wxBUILD_INSTALL OFF CACHE BOOL "" FORCE)
-set(wxUSE_STC       OFF CACHE BOOL "" FORCE)
-set(wxUSE_WEBVIEW   OFF CACHE BOOL "" FORCE)
-set(wxUSE_MEDIACTRL OFF CACHE BOOL "" FORCE)
-
-FetchContent_Declare(
-  wxWidgets
-  URL      https://github.com/wxWidgets/wxWidgets/releases/download/v3.2.10/wxWidgets-3.2.10.tar.bz2
-  URL_HASH SHA256=d66e929569947a4a5920699539089a9bda83a93e5f4917fb313a61f0c344b896
-)
-FetchContent_MakeAvailable(wxWidgets)
-
-# Force UTF-8 source AND execution charsets on MSVC. By default MSVC
-# picks the source charset based on the system locale, which on most
-# Windows installs is NOT UTF-8 — so non-ASCII literals (em-dash, middle
-# dot, etc.) in our sources would get reinterpreted at compile time and
-# emerge as mojibake at run time. Placed AFTER FetchContent_MakeAvailable
-# for wxWidgets so its bundled C/C++ deps keep their own settings. GCC,
-# Clang, and mingw already default to UTF-8 source/exec charsets.
+# Force UTF-8 source AND execution charsets on MSVC. By default
+# MSVC picks the source charset based on the system locale, which
+# on most Windows installs is NOT UTF-8 — so non-ASCII literals
+# (em-dash, middle dot, etc.) in our sources would get
+# reinterpreted at compile time and emerge as mojibake at run
+# time. Placed AFTER FetchWxWidgets so wx's bundled C/C++ deps
+# keep their own settings. GCC, Clang, and mingw already default
+# to UTF-8 source/exec charsets.
 if(MSVC)
   add_compile_options(/utf-8)
 endif()
 
-# --- SQLite3 (amalgamation) ---
+include(FetchSQLite)
+include(FetchPugixml)
 
-fetch_content_bundled(sqlite sqlite)
-
-FetchContent_Declare(
-  sqlite
-  URL https://www.sqlite.org/2025/sqlite-amalgamation-3490100.zip
-  URL_HASH SHA256=6cebd1d8403fc58c30e93939b246f3e6e58d0765a5cd50546f16c00fd805d2c3
-)
-FetchContent_MakeAvailable(sqlite)
-
-add_library(sqlite3 STATIC ${sqlite_SOURCE_DIR}/sqlite3.c)
-target_include_directories(sqlite3 PUBLIC ${sqlite_SOURCE_DIR})
-target_compile_definitions(sqlite3 PRIVATE
-  SQLITE_DQS=0
-  SQLITE_THREADSAFE=2
-  SQLITE_DEFAULT_MEMSTATUS=0
-  SQLITE_DEFAULT_WAL_SYNCHRONOUS=1
-  SQLITE_LIKE_DOESNT_MATCH_BLOBS
-  SQLITE_OMIT_DEPRECATED
-  SQLITE_OMIT_SHARED_CACHE
-)
-
-# --- pugixml ---
-
-fetch_content_bundled(pugixml pugixml)
-
-FetchContent_Declare(
-  pugixml
-  URL https://github.com/zeux/pugixml/releases/download/v1.14/pugixml-1.14.tar.gz
-  URL_HASH SHA256=2f10e276870c64b1db6809050a75e11a897a8d7456c4be5c6b2e35a11168a015
-)
-FetchContent_MakeAvailable(pugixml)
-
-# --- mbedTLS + cpp-httplib (POSIX only; Windows uses WinHTTP) ---
-
+# mbedTLS + cpp-httplib aren't needed on Windows — http_win.cpp
+# uses WinHTTP and httplib.h is never included.
 if(NOT WIN32)
-  # mbedTLS
-  fetch_content_bundled(mbedtls mbedtls)
-
-  set(ENABLE_PROGRAMS OFF CACHE BOOL "" FORCE)
-  set(ENABLE_TESTING  OFF CACHE BOOL "" FORCE)
-  set(MBEDTLS_AS_SUBPROJECT ON CACHE BOOL "" FORCE)
-  set(MBEDTLS_FATAL_WARNINGS OFF CACHE BOOL "" FORCE)
-  FetchContent_Declare(
-    mbedtls
-    URL      https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-3.6.2/mbedtls-3.6.2.tar.bz2
-    URL_HASH SHA256=8b54fb9bcf4d5a7078028e0520acddefb7900b3e66fec7f7175bb5b7d85ccdca
-  )
-  FetchContent_MakeAvailable(mbedtls)
-
-  # cpp-httplib (header-only; only need its include path)
-  fetch_content_bundled(cpp-httplib cpp-httplib)
-
-  FetchContent_Declare(
-    cpp-httplib
-    URL      https://github.com/yhirose/cpp-httplib/archive/refs/tags/v0.43.0.tar.gz
-    URL_HASH SHA256=28b88a7f0751c762cc9c70c91db0d6953554c40f49285907e716dd7943a824a5
-  )
-  FetchContent_MakeAvailable(cpp-httplib)
+  include(FetchMbedTLS)
+  include(FetchCppHttplib)
 endif()
 
 # --- Elfeed ---
@@ -223,8 +177,19 @@ if(WIN32)
 else()
   target_link_libraries(elfeed2 PRIVATE
     mbedtls mbedx509 mbedcrypto
+    cpp-httplib
   )
-  target_include_directories(elfeed2 PRIVATE ${cpp-httplib_SOURCE_DIR})
+  if(APPLE)
+    # Newer cpp-httplib versions (v0.43.1+ as packaged by Homebrew)
+    # added native keychain CA enumeration that calls into Security
+    # framework. Link defensively — both frameworks are part of
+    # macOS, no install footprint.
+    target_link_libraries(elfeed2 PRIVATE
+      "-framework Security" "-framework CoreFoundation")
+  endif()
+  # The MBEDTLS_SUPPORT define toggles TLS support inside the
+  # header at our compile site; doesn't affect cpp-httplib's own
+  # build (which is header-only as we use it).
   target_compile_definitions(elfeed2 PRIVATE CPPHTTPLIB_MBEDTLS_SUPPORT)
 endif()
 

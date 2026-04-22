@@ -16,11 +16,23 @@ is somewhat broader, and Elfeed2 has a built-in video (via user-supplied
 
 ## Building
 
-Requires CMake 3.25+ and a C++20 compiler. All other dependencies are
-fetched automatically.
+Requires CMake 3.25+ and a C++20 compiler. By default all dependencies
+are fetched automatically (pinned versions, hermetic build):
 
     $ cmake -B build
     $ cmake --build build
+
+Distribution packagers can switch to system-installed dependencies
+(wxWidgets ≥ 3.2, SQLite3, pugixml, mbedTLS 3.x, cpp-httplib) via
+`-DDEPS=LOCAL`:
+
+    $ cmake -B build -DDEPS=LOCAL
+    $ cmake --build build
+
+mbedTLS must be in the 3.x series — cpp-httplib v0.43 doesn't yet
+support 4.x's reorganized header layout, and the build will refuse
+to configure if it finds 4.x. Debian, Fedora, and Ubuntu all currently
+ship 3.x.
 
 To cross-compile a self-contained Windows binary from Linux/macOS using
 mingw-w64 (apt: `gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64`, brew:
