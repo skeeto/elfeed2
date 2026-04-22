@@ -304,12 +304,21 @@ bool ElfeedApp::OnInit()
     // state would clobber each other at close time. Scope the lock
     // per (user, DB) so a --db override (e.g. a test instance
     // against /tmp/test.db) doesn't conflict with the production
-    // instance against the default DB.
+    // instance against the default DB. Drop the lock file in the
+    // DB's own directory rather than $HOME (wx's default): on an
+    // unclean exit the file isn't unlinked, and having the stray
+    // files collect next to the DB is much tidier than seeing
+    // them pile up at the top of the user's home.
     auto db_token = std::hash<std::string>{}(state_.db_path);
-    instance_checker_ = std::make_unique<wxSingleInstanceChecker>(
-        wxString::Format("elfeed2-%s-%lx",
-                         wxGetUserId(),
-                         (unsigned long)db_token));
+    wxString lock_name = wxString::Format(
+        "elfeed2-%s-%lx", wxGetUserId(), (unsigned long)db_token);
+    wxString lock_dir;
+    {
+        wxFileName fn(wxString::FromUTF8(state_.db_path));
+        if (fn.HasName()) lock_dir = fn.GetPath();
+    }
+    instance_checker_ =
+        std::make_unique<wxSingleInstanceChecker>(lock_name, lock_dir);
     if (instance_checker_->IsAnotherRunning()) {
         wxMessageBox("Another Elfeed2 instance is already running "
                      "against this database.",
