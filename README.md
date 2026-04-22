@@ -63,6 +63,7 @@ values like `#f9f` aren't mistaken for comments).
     max-connections       16
     fetch-timeout         30               # per-feed, seconds
     max-download-failures 5                # then mark "failed" until Retry
+    log-retention-days    90               # DB log history kept across runs
 
 ### Feeds
 

@@ -495,6 +495,11 @@ void MainFrame::on_wake(wxThreadEvent &)
     // replace the broken <img> boxes.
     if (image_cache_process_results(app_) && detail_)
         detail_->relayout();
+    // Persist whatever new log entries the workers produced this
+    // wake-cycle. Cheap when nothing's new (early-exits under the
+    // mutex check), batches multiple entries per transaction when
+    // there are many.
+    log_drain_to_db(app_);
     update_status();
     download_tick(app_);
     if (pane_shown("log")       && log_)       log_->refresh();

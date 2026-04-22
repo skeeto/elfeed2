@@ -139,6 +139,10 @@ struct Elfeed {
     // in the queue (visible in the Downloads pane as "failed") so
     // the user can right-click → Retry to reset and try again.
     int max_download_failures = 5;
+    // Days of log history to keep in the DB. Older rows are
+    // purged on startup. Default 90; configurable via the
+    // `log-retention-days` directive.
+    int log_retention_days = 90;
     // Single-letter filter presets (from the `preset` config directive).
     // Key is the ASCII letter the user pressed; value is the filter
     // string to apply. Populated by config_load.
@@ -207,6 +211,10 @@ struct Elfeed {
     // Log
     std::mutex log_mutex;
     std::vector<LogEntry> log;
+    // Count of log entries already written to the DB. The next
+    // log_drain_to_db pass picks up at this index. Touched only
+    // from the UI thread (drain happens there).
+    size_t log_db_committed = 0;
 
     // Persistent UI toggles (saved to DB). Pane visibility lives in
     // the wxAUI perspective string under DB key "layout".
@@ -246,6 +254,22 @@ void db_set_user_title(Elfeed *app, const std::string &url,
 void db_load_feed_titles(Elfeed *app);
 void db_save_ui_state(Elfeed *app, const char *key, const char *value);
 std::string db_load_ui_state(Elfeed *app, const char *key);
+
+// Log persistence. db_log_load reads entries with time >=
+// since_epoch into `out`, ordered chronologically. db_log_save
+// appends a batch. db_log_purge deletes entries older than
+// older_than_epoch. db_log_clear empties the table.
+void db_log_load(Elfeed *app, double since_epoch,
+                 std::vector<LogEntry> &out);
+void db_log_save(Elfeed *app, const std::vector<LogEntry> &entries);
+void db_log_purge(Elfeed *app, double older_than_epoch);
+void db_log_clear(Elfeed *app);
+
+// Drain new in-memory log entries (since app->log_db_committed)
+// to the DB. Holds log_mutex briefly to copy out the new range,
+// then writes outside the lock. Safe to call frequently —
+// returns immediately if nothing's new.
+void log_drain_to_db(Elfeed *app);
 
 // Config
 void config_load(Elfeed *app);

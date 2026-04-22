@@ -4,6 +4,8 @@
 #include <wx/button.h>
 #include <wx/checkbox.h>
 #include <wx/clipbrd.h>
+#include <wx/filedlg.h>
+#include <wx/file.h>
 #include <wx/menu.h>
 #include <wx/sizer.h>
 #include <wx/variant.h>
@@ -245,13 +247,55 @@ void LogPanel::on_context_menu(wxDataViewEvent &event)
     // Whether to enable Copy depends on having a selection — empty
     // selection (right-click on empty area) shouldn't be reachable
     // here since item.IsOk() above would have returned false.
-    enum { ID_Copy = wxID_HIGHEST + 1, ID_Clear };
+    enum { ID_Copy = wxID_HIGHEST + 1, ID_Export, ID_Clear };
     wxMenu menu;
-    menu.Append(ID_Copy,  "&Copy");
+    menu.Append(ID_Copy,   "&Copy");
+    menu.Append(ID_Export, "&Export to File…");
     menu.AppendSeparator();
-    menu.Append(ID_Clear, "Clear &Log");
+    menu.Append(ID_Clear,  "Clear &Log");
 
     int choice = list_->GetPopupMenuSelectionFromUser(menu);
+    if (choice == ID_Export) {
+        // Save the FULL in-memory log (which includes whatever we
+        // loaded from DB on startup plus this session's entries),
+        // ignoring panel filter checkboxes — bug reports want the
+        // unfiltered context. Header lines name the program and
+        // export time so the recipient can tell what they're
+        // looking at.
+        wxFileDialog dlg(this, "Export Log", wxString(),
+                         "elfeed2-log.txt",
+                         "Text files (*.txt)|*.txt|All files|*",
+                         wxFD_SAVE | wxFD_OVERWRITE_PROMPT);
+        if (dlg.ShowModal() != wxID_OK) return;
+        std::vector<LogEntry> all;
+        {
+            std::lock_guard lock(app_->log_mutex);
+            all = app_->log;
+        }
+        std::string out;
+        out += "Elfeed2 " ELFEED_VERSION "\n";
+        out += "Exported " + format_datetime((double)::time(nullptr));
+        out += "\n";
+        out += "----------------------------------------\n";
+        for (auto &e : all) {
+            const char *kind = "?";
+            switch (e.kind) {
+            case LOG_INFO:    kind = "info"; break;
+            case LOG_REQUEST: kind = "req";  break;
+            case LOG_SUCCESS: kind = "ok";   break;
+            case LOG_ERROR:   kind = "err";  break;
+            }
+            out += format_datetime(e.time);
+            out += " [";
+            out += kind;
+            out += "] ";
+            out += e.message;
+            out += "\n";
+        }
+        wxFile f(dlg.GetPath(), wxFile::write);
+        if (f.IsOpened()) f.Write(wxString::FromUTF8(out));
+        return;
+    }
     if (choice == ID_Copy) {
         // Stitch the selected rows into a clipboard string. Each
         // line is "<datetime> [<kind>] <message>" — same shape as
@@ -297,6 +341,16 @@ void LogPanel::on_filter_changed(wxCommandEvent &)
     app_->log_show_success  = cb_ok_->GetValue();
     app_->log_show_errors   = cb_err_->GetValue();
     app_->log_auto_scroll   = cb_autoscroll_->GetValue();
+    // Persist so the next launch starts with the same kinds
+    // visible / hidden as the user last had.
+    auto save = [&](const char *k, bool v) {
+        db_save_ui_state(app_, k, v ? "1" : "0");
+    };
+    save("log.show_info",     app_->log_show_info);
+    save("log.show_requests", app_->log_show_requests);
+    save("log.show_success",  app_->log_show_success);
+    save("log.show_errors",   app_->log_show_errors);
+    save("log.auto_scroll",   app_->log_auto_scroll);
     refresh();
 }
 
@@ -305,7 +359,12 @@ void LogPanel::on_clear(wxCommandEvent &)
     {
         std::lock_guard lock(app_->log_mutex);
         app_->log.clear();
+        // Reset the persisted-up-to mark — we just dropped every
+        // entry from memory and the DB. The next log_drain_to_db
+        // starts fresh from index 0.
+        app_->log_db_committed = 0;
     }
+    db_log_clear(app_);
     refresh();
 }
 

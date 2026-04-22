@@ -94,6 +94,18 @@ CREATE TABLE IF NOT EXISTS image_cache (
 
 CREATE INDEX IF NOT EXISTS idx_image_cache_lru
     ON image_cache(last_used);
+
+-- Log entries persisted across runs. UI thread drains the in-memory
+-- log into this table on every wake; startup loads back the last
+-- log_retention_days worth and purges anything older.
+CREATE TABLE IF NOT EXISTS log_entry (
+    time    REAL    NOT NULL,
+    kind    INTEGER NOT NULL,
+    message TEXT    NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_log_entry_time
+    ON log_entry(time);
 )";
 
 // --- Database operations ---
@@ -705,4 +717,71 @@ std::string db_load_ui_state(Elfeed *app, const char *key)
     }
     sqlite3_finalize(stmt);
     return result;
+}
+
+// ---- Log persistence ---------------------------------------------
+
+void db_log_load(Elfeed *app, double since_epoch,
+                 std::vector<LogEntry> &out)
+{
+    if (!app->db) return;
+    // ORDER BY time, rowid: workers stamp entries to second
+    // resolution so ties happen; rowid keeps insertion order
+    // stable within a tied second.
+    const char *sql =
+        "SELECT time, kind, message FROM log_entry"
+        " WHERE time >= ? ORDER BY time, rowid";
+    sqlite3_stmt *stmt;
+    if (sqlite3_prepare_v2(app->db, sql, -1, &stmt, nullptr) != SQLITE_OK)
+        return;
+    sqlite3_bind_double(stmt, 1, since_epoch);
+    while (sqlite3_step(stmt) == SQLITE_ROW) {
+        LogEntry e;
+        e.time = sqlite3_column_double(stmt, 0);
+        e.kind = (LogKind)sqlite3_column_int(stmt, 1);
+        if (auto *t = (const char *)sqlite3_column_text(stmt, 2))
+            e.message = t;
+        out.push_back(std::move(e));
+    }
+    sqlite3_finalize(stmt);
+}
+
+void db_log_save(Elfeed *app, const std::vector<LogEntry> &entries)
+{
+    if (!app->db || entries.empty()) return;
+    sqlite3_exec(app->db, "BEGIN", nullptr, nullptr, nullptr);
+    const char *sql =
+        "INSERT INTO log_entry (time, kind, message) VALUES (?,?,?)";
+    sqlite3_stmt *stmt;
+    if (sqlite3_prepare_v2(app->db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+        for (const auto &e : entries) {
+            sqlite3_bind_double(stmt, 1, e.time);
+            sqlite3_bind_int(stmt, 2, (int)e.kind);
+            sqlite3_bind_text(stmt, 3, e.message.c_str(), -1,
+                              SQLITE_TRANSIENT);
+            sqlite3_step(stmt);
+            sqlite3_reset(stmt);
+        }
+        sqlite3_finalize(stmt);
+    }
+    sqlite3_exec(app->db, "COMMIT", nullptr, nullptr, nullptr);
+}
+
+void db_log_purge(Elfeed *app, double older_than_epoch)
+{
+    if (!app->db) return;
+    const char *sql = "DELETE FROM log_entry WHERE time < ?";
+    sqlite3_stmt *stmt;
+    if (sqlite3_prepare_v2(app->db, sql, -1, &stmt, nullptr) != SQLITE_OK)
+        return;
+    sqlite3_bind_double(stmt, 1, older_than_epoch);
+    sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+}
+
+void db_log_clear(Elfeed *app)
+{
+    if (!app->db) return;
+    sqlite3_exec(app->db, "DELETE FROM log_entry",
+                 nullptr, nullptr, nullptr);
 }

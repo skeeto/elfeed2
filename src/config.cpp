@@ -248,6 +248,12 @@ void config_load(Elfeed *app)
             app->max_download_failures = n;
             continue;
         }
+        if (dir0 == "log-retention-days") {
+            int n = atoi(value_after_directive(line).c_str());
+            if (n < 1) n = 1;
+            app->log_retention_days = n;
+            continue;
+        }
 
         // --- stanza body (applies to current feed) -----------------
         if (dir0 == "title") {

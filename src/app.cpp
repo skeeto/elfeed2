@@ -76,7 +76,49 @@ void elfeed_init(Elfeed *app)
         catch (...) { app->last_fetch = 0; }
     }
 
+    // Restore the log filter checkbox state. ui_state values are
+    // "1" or "0"; missing keys default to true (the struct default).
+    auto load_bool = [&](const char *key, bool &dst) {
+        std::string v = db_load_ui_state(app, key);
+        if (!v.empty()) dst = (v != "0");
+    };
+    load_bool("log.show_info",     app->log_show_info);
+    load_bool("log.show_requests", app->log_show_requests);
+    load_bool("log.show_success",  app->log_show_success);
+    load_bool("log.show_errors",   app->log_show_errors);
+    load_bool("log.auto_scroll",   app->log_auto_scroll);
+
+    // Restore log history from the previous session, then purge
+    // anything older than the retention window. Done in this order
+    // so the user sees the in-memory log immediately even if the
+    // purge takes a moment on a very large table.
+    double now = (double)::time(nullptr);
+    double cutoff = now - (double)app->log_retention_days * 86400.0;
+    {
+        std::lock_guard lock(app->log_mutex);
+        db_log_load(app, cutoff, app->log);
+        app->log_db_committed = app->log.size();
+    }
+    db_log_purge(app, cutoff);
+
     app->current_filter = filter_parse(app->default_filter);
+}
+
+void log_drain_to_db(Elfeed *app)
+{
+    // Copy out the new range under the mutex (cheap) so worker
+    // threads aren't blocked on the DB write that follows. Tracks
+    // log_db_committed as the high-water mark of "already persisted"
+    // entries — touched only here on the UI thread.
+    std::vector<LogEntry> batch;
+    {
+        std::lock_guard lock(app->log_mutex);
+        if (app->log_db_committed >= app->log.size()) return;
+        batch.assign(app->log.begin() + app->log_db_committed,
+                     app->log.end());
+        app->log_db_committed = app->log.size();
+    }
+    db_log_save(app, batch);
 }
 
 void config_reload(Elfeed *app)
@@ -95,6 +137,7 @@ void config_reload(Elfeed *app)
     app->max_connections = 16;
     app->fetch_timeout = 30;
     app->max_download_failures = 5;
+    app->log_retention_days = 90;
 
     config_load(app);
 
