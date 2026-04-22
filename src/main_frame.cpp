@@ -155,7 +155,16 @@ void MainFrame::build_menus()
     auto *mbar = new wxMenuBar;
 
     auto *m_elfeed = new wxMenu;
+    // F5 is the universal "refresh" key on Windows/Linux, but on macOS
+    // F5 is intercepted by the OS for spotlight / function-key remaps.
+    // Use Cmd+R on macOS — that's what browsers and Finder use for
+    // reload, and what users reach for when they want "update now".
+    // (Capital G also works on all platforms; see on_list_key.)
+#ifdef __WXOSX__
+    m_elfeed->Append(ID_Fetch, "&Fetch All\tCtrl+R");
+#else
     m_elfeed->Append(ID_Fetch, "&Fetch All\tF5");
+#endif
     m_elfeed->Append(ID_ReloadConfig, "&Reload Config\tCtrl+Shift+R");
     m_elfeed->AppendSeparator();
     m_elfeed->Append(ID_ImportClassic, wxT("&Import Classic Elfeed Index…"));
@@ -910,11 +919,21 @@ void MainFrame::on_list_key(wxKeyEvent &e)
     case 'J': if (plain) { move_selection(+1); return; } break;
     case 'K': if (plain) { move_selection(-1); return; } break;
     case 'G':
-        if (e.ShiftDown())
-            go_to((long)app_->entries.size() - 1);
-        else if (plain)
+        // Lowercase g jumps to the top of the list. Capital G
+        // (Shift+G) triggers Fetch All — original Elfeed reserves
+        // shifted letters for "expensive" actions, and a network
+        // roundtrip over every feed definitely qualifies. We drop
+        // the vi-style "G = bottom of list" binding: scrolling to
+        // the end of a chronological feed view isn't a frequent
+        // enough action to fight the Elfeed muscle memory.
+        if (e.ShiftDown()) {
+            fetch_all(app_);
+            update_status();
+        } else if (plain) {
             go_to(0);
-        else break;
+        } else {
+            break;
+        }
         return;
     case 'U': if (plain) { action_mark_unread();      return; } break;
     case 'R': if (plain) { action_mark_read();        return; } break;
