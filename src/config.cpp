@@ -12,7 +12,7 @@
 //
 //   # comment to end of line (also trailing: "...value # comment")
 //   download-dir ~/Downloads
-//   ytdlp-arg    --no-warnings           # ytdlp-arg accumulates
+//   yt-dlp-arg   --no-warnings           # yt-dlp-arg accumulates
 //
 //   alias youtube https://www.youtube.com/feeds/videos.xml?channel_id={}
 //
@@ -228,11 +228,11 @@ void config_load(Elfeed *app)
             app->download_dir = expand_tilde(value_after_directive(line));
             continue;
         }
-        if (dir0 == "ytdlp-program") {
+        if (dir0 == "yt-dlp-program") {
             app->ytdlp_program = value_after_directive(line);
             continue;
         }
-        if (dir0 == "ytdlp-arg") {
+        if (dir0 == "yt-dlp-arg") {
             app->ytdlp_args.push_back(value_after_directive(line));
             continue;
         }

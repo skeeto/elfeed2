@@ -84,9 +84,9 @@ values like `#f9f` aren't mistaken for comments).
 ### Global settings
 
     download-dir          ~/Downloads      # ~ expands to your home
-    ytdlp-program         yt-dlp
-    ytdlp-arg             --no-warnings    # repeatable
-    ytdlp-arg             --embed-metadata
+    yt-dlp-program        yt-dlp
+    yt-dlp-arg            --no-warnings    # repeatable
+    yt-dlp-arg            --embed-metadata
     default-filter        @6-months-ago +unread
     max-connections       16
     fetch-timeout         30               # per-feed, seconds

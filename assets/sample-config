@@ -14,11 +14,11 @@ download-dir         ~/Downloads
 
 # Program used for video downloads (entries with no enclosure but
 # a "video" tag). The default expects yt-dlp on PATH.
-ytdlp-program        yt-dlp
+yt-dlp-program       yt-dlp
 
 # Pass extra args to yt-dlp. Repeatable; one --arg per line.
-ytdlp-arg            --no-warnings
-ytdlp-arg            --embed-metadata
+yt-dlp-arg           --no-warnings
+yt-dlp-arg           --embed-metadata
 
 # Initial filter applied to the entry list at startup. This is also
 # what Reset Layout falls back to. Filter syntax:
