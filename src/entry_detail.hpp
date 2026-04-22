@@ -21,7 +21,13 @@ public:
     // cached so relayout() can re-render after images land from the
     // background cache. Callers must keep the pointed-to Entry alive
     // (typically app->entries[row]) until show_entry is called again.
-    void show_entry(const Entry *entry);
+    //
+    // Authors and enclosures are loaded from the DB here on-demand —
+    // db_query_entries deliberately skips them during live listing
+    // queries (they're not needed for the grid and the extra
+    // sub-queries multiplied typing latency). We populate them
+    // right on the app->entries element as a one-time side effect.
+    void show_entry(Entry *entry);
 
     // Re-render the currently-shown entry. Called after new image
     // bytes arrive in the cache so wxHtmlWindow picks them up. Scroll
@@ -49,7 +55,7 @@ private:
     wxStaticText *link_ = nullptr;
     std::string   link_url_;   // click target for link_
     wxHtmlWindow *body_ = nullptr;
-    const Entry  *current_ = nullptr;
+    Entry        *current_ = nullptr;
 };
 
 #endif

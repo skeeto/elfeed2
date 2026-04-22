@@ -239,6 +239,14 @@ void db_close(Elfeed *app);
 void db_add_entries(Elfeed *app, std::vector<Entry> &entries);
 void db_query_entries(Elfeed *app, const Filter &filter,
                       std::vector<Entry> &out);
+// Fill in authors and enclosures for a single Entry. The listing
+// query deliberately skips these because they're needed only when
+// an entry is actually shown (preview pane) or acted on (download
+// / right-click-menu gating). Pulling them for every row of every
+// live-typing requery was a non-trivial fraction of the filter
+// stall on large DBs. Tags stay in the listing query since the
+// entry list displays them.
+void db_entry_load_details(Elfeed *app, Entry &e);
 // Pull just the `date` column for every entry with `date >= since`,
 // unfiltered by anything else. Used by the Activity panel, which
 // shows a whole-history cadence independent of the listing filter.

@@ -133,7 +133,7 @@ void EntryDetail::scroll_lines(int lines)
     body_->Scroll(vx, new_vy);
 }
 
-void EntryDetail::show_entry(const Entry *e)
+void EntryDetail::show_entry(Entry *e)
 {
     current_ = e;
 
@@ -145,6 +145,11 @@ void EntryDetail::show_entry(const Entry *e)
         Layout();
         return;
     }
+
+    // Deferred load: the listing query skips author/enclosure
+    // sub-queries for speed. Fill them in now (cheap: one-entry
+    // read) so the subtitle and enclosure strip render properly.
+    db_entry_load_details(app_, *e);
 
     title_->SetLabel(wxString::FromUTF8(html_strip(e->title)));
 

@@ -524,24 +524,16 @@ void db_query_entries(Elfeed *app, const Filter &filter,
                link.find(m.literal)  != std::string::npos;
     };
 
-    // Per-entry lookup statements (tags, authors, enclosures).
+    // Per-entry tag lookup. Authors and enclosures are NOT loaded
+    // here — they're fetched on-demand via db_entry_load_details
+    // when an entry is actually previewed or acted upon. Running
+    // them per row of a live-typing requery multiplied the query's
+    // SQL round-trips by 3× for no listing-visible benefit.
     const char *tags_sql =
         "SELECT tag FROM entry_tag WHERE namespace=? AND entry_id=? ORDER BY tag";
-    const char *authors_sql =
-        "SELECT name,email,uri FROM entry_author"
-        " WHERE namespace=? AND entry_id=? ORDER BY seq";
-    const char *encs_sql =
-        "SELECT url,type,length FROM entry_enclosure"
-        " WHERE namespace=? AND entry_id=? ORDER BY seq";
-    sqlite3_stmt *tags_stmt    = nullptr;
-    sqlite3_stmt *authors_stmt = nullptr;
-    sqlite3_stmt *encs_stmt    = nullptr;
+    sqlite3_stmt *tags_stmt = nullptr;
     bool have_tags =
-        sqlite3_prepare_v2(app->db, tags_sql,    -1, &tags_stmt,    nullptr) == SQLITE_OK;
-    bool have_auth =
-        sqlite3_prepare_v2(app->db, authors_sql, -1, &authors_stmt, nullptr) == SQLITE_OK;
-    bool have_encs =
-        sqlite3_prepare_v2(app->db, encs_sql,    -1, &encs_stmt,    nullptr) == SQLITE_OK;
+        sqlite3_prepare_v2(app->db, tags_sql, -1, &tags_stmt, nullptr) == SQLITE_OK;
 
     while (sqlite3_step(stmt) == SQLITE_ROW) {
         Entry e;
@@ -572,33 +564,6 @@ void db_query_entries(Elfeed *app, const Filter &filter,
             while (sqlite3_step(tags_stmt) == SQLITE_ROW) {
                 if (auto *t = (const char *)sqlite3_column_text(tags_stmt, 0))
                     e.tags.push_back(t);
-            }
-        }
-
-        if (have_auth) {
-            bind_ns_id(authors_stmt);
-            while (sqlite3_step(authors_stmt) == SQLITE_ROW) {
-                Author a;
-                if (auto *t = (const char *)sqlite3_column_text(authors_stmt, 0))
-                    a.name = t;
-                if (auto *t = (const char *)sqlite3_column_text(authors_stmt, 1))
-                    a.email = t;
-                if (auto *t = (const char *)sqlite3_column_text(authors_stmt, 2))
-                    a.uri = t;
-                e.authors.push_back(std::move(a));
-            }
-        }
-
-        if (have_encs) {
-            bind_ns_id(encs_stmt);
-            while (sqlite3_step(encs_stmt) == SQLITE_ROW) {
-                Enclosure enc;
-                if (auto *t = (const char *)sqlite3_column_text(encs_stmt, 0))
-                    enc.url = t;
-                if (auto *t = (const char *)sqlite3_column_text(encs_stmt, 1))
-                    enc.type = t;
-                enc.length = sqlite3_column_int64(encs_stmt, 2);
-                e.enclosures.push_back(std::move(enc));
             }
         }
 
@@ -679,9 +644,54 @@ void db_query_entries(Elfeed *app, const Filter &filter,
     }
 
     if (have_tags) sqlite3_finalize(tags_stmt);
-    if (have_auth) sqlite3_finalize(authors_stmt);
-    if (have_encs) sqlite3_finalize(encs_stmt);
     sqlite3_finalize(stmt);
+}
+
+void db_entry_load_details(Elfeed *app, Entry &e)
+{
+    // Populate authors + enclosures for a single entry. Used by
+    // the preview pane and the download action. Cheap because it
+    // runs for 1 entry (or at most a small multi-selection),
+    // unlike the old path which ran for every row of every
+    // live-typing requery. Safe to call repeatedly — we re-clear
+    // each time so a second call after tag changes still reflects
+    // the DB state.
+    e.authors.clear();
+    e.enclosures.clear();
+    if (!app->db) return;
+
+    sqlite3_stmt *astmt = nullptr, *estmt = nullptr;
+    if (sqlite3_prepare_v2(app->db,
+            "SELECT name,email,uri FROM entry_author"
+            " WHERE namespace=? AND entry_id=? ORDER BY seq",
+            -1, &astmt, nullptr) == SQLITE_OK) {
+        sqlite3_bind_text(astmt, 1, e.namespace_.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(astmt, 2, e.id.c_str(),         -1, SQLITE_TRANSIENT);
+        while (sqlite3_step(astmt) == SQLITE_ROW) {
+            Author a;
+            if (auto *t = (const char *)sqlite3_column_text(astmt, 0)) a.name  = t;
+            if (auto *t = (const char *)sqlite3_column_text(astmt, 1)) a.email = t;
+            if (auto *t = (const char *)sqlite3_column_text(astmt, 2)) a.uri   = t;
+            e.authors.push_back(std::move(a));
+        }
+        sqlite3_finalize(astmt);
+    }
+
+    if (sqlite3_prepare_v2(app->db,
+            "SELECT url,type,length FROM entry_enclosure"
+            " WHERE namespace=? AND entry_id=? ORDER BY seq",
+            -1, &estmt, nullptr) == SQLITE_OK) {
+        sqlite3_bind_text(estmt, 1, e.namespace_.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(estmt, 2, e.id.c_str(),         -1, SQLITE_TRANSIENT);
+        while (sqlite3_step(estmt) == SQLITE_ROW) {
+            Enclosure enc;
+            if (auto *t = (const char *)sqlite3_column_text(estmt, 0)) enc.url  = t;
+            if (auto *t = (const char *)sqlite3_column_text(estmt, 1)) enc.type = t;
+            enc.length = sqlite3_column_int64(estmt, 2);
+            e.enclosures.push_back(std::move(enc));
+        }
+        sqlite3_finalize(estmt);
+    }
 }
 
 void db_entry_dates_since(Elfeed *app, double since,

@@ -914,12 +914,15 @@ void MainFrame::on_list_context_menu(wxDataViewEvent &event)
     }
 
     auto sel = list_->selection();
+    // Enclosure data is deferred during the listing query, so we
+    // need to pull it for the selected rows before we can gate the
+    // "Download Enclosure" menu item on any_enclosure.
     bool any_enclosure = false;
     for (long i : sel) {
-        if (i >= 0 && (size_t)i < app_->entries.size() &&
-            !app_->entries[(size_t)i].enclosures.empty()) {
-            any_enclosure = true;
-            break;
+        if (i >= 0 && (size_t)i < app_->entries.size()) {
+            Entry &e = app_->entries[(size_t)i];
+            db_entry_load_details(app_, e);
+            if (!e.enclosures.empty()) { any_enclosure = true; break; }
         }
     }
 
@@ -1343,6 +1346,10 @@ void MainFrame::action_download()
     for (long i : sel) {
         if (i < 0 || (size_t)i >= app_->entries.size()) continue;
         Entry &e = app_->entries[(size_t)i];
+        // Listing query defers enclosure loading; pull it now so
+        // the enclosure-vs-yt-dlp branch below makes the right
+        // call for this entry.
+        db_entry_load_details(app_, e);
 
         if (!e.enclosures.empty()) {
             // Enclosure present (e.g. podcast): download the first one
