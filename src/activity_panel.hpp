@@ -44,6 +44,17 @@ private:
     // absolute count magnitudes.
     int min_count_ = 0;
     int max_count_ = 0;
+
+    // Pre-computed geometry inputs: the local-midnight epoch of
+    // each cell in the 53×7 grid, and the month (0-11) of each
+    // column's Sunday. Populated by refresh(); paint reads these
+    // instead of running mktime/localtime 400+ times per frame.
+    // Without this cache, on_paint took enough wall time on slow
+    // machines (where mktime involves a tzdata lookup) that any
+    // accidental repaint cascade during typing felt like a UI
+    // freeze. Paint is now just lookups + rectangle fills.
+    int64_t cell_day_[53][7] = {};
+    int     col_month_[53]   = {};
 };
 
 #endif

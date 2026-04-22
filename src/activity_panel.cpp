@@ -168,6 +168,21 @@ void ActivityPanel::refresh()
         if (min_count_ == 0 || c < min_count_) min_count_ = c;
     }
 
+    // Pre-compute day_at / month for every grid cell once here,
+    // instead of running 400+ mktime calls on every paint. The
+    // anchor changes only when the wall-clock week rolls over,
+    // so refreshing these at the same cadence as the data is
+    // plenty current in practice.
+    int64_t anchor = heatmap_anchor();
+    for (int col = 0; col < 53; col++) {
+        for (int row = 0; row < 7; row++)
+            cell_day_[col][row] = day_at(anchor, col, row);
+        time_t t = (time_t)cell_day_[col][0];
+        struct tm tm{};
+        localtime_r(&t, &tm);
+        col_month_[col] = tm.tm_mon;
+    }
+
     Refresh();
 }
 
@@ -220,14 +235,13 @@ void ActivityPanel::on_paint(wxPaintEvent &)
 
     Geom g = compute_geom(dc, sz);
 
-    // Anchor and today's day-start; cells past today stay blank.
-    int64_t anchor     = heatmap_anchor();
+    // Today's day-start caps the visible range; future cells
+    // (the trailing end of the current week) stay blank.
     int64_t today_start = day_start_of((double)time(nullptr));
 
-    // Draw day-of-week labels (Mon, Wed, Fri) at rows 1, 3, 5.
-    // With Sun at row 0 and Sat at row 6, this labels three
-    // alternating weekdays, matching GitHub's two-of-three
-    // convention that orients the reader without crowding rows.
+    // Day-of-week labels (Mon, Wed, Fri) at rows 1, 3, 5. With Sun
+    // at row 0 and Sat at row 6, this labels three alternating
+    // weekdays, matching GitHub's two-of-three convention.
     static const char *day_names[7] = {
         "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"
     };
@@ -238,19 +252,16 @@ void ActivityPanel::on_paint(wxPaintEvent &)
         dc.DrawText(day_names[r], 2, y);
     }
 
-    // Draw month labels across the top, one per column where that
-    // column's Sunday (row 0) falls in a new month.
+    // Month labels across the top, one per column where the
+    // column's Sunday falls in a new month. The col_month_ array
+    // is pre-computed in refresh() so paint avoids tzdata lookups.
     static const char *month_names[12] = {
         "Jan","Feb","Mar","Apr","May","Jun",
         "Jul","Aug","Sep","Oct","Nov","Dec"
     };
     int prev_month = -1;
     for (int col = 0; col < 53; col++) {
-        int64_t col_sunday = day_at(anchor, col, 0);
-        time_t tt = (time_t)col_sunday;
-        struct tm tm{};
-        localtime_r(&tt, &tm);
-        int month = tm.tm_mon;
+        int month = col_month_[col];
         if (month != prev_month) {
             int x = g.grid_x + col * (g.cell + g.gap);
             dc.DrawText(month_names[month], x, 0);
@@ -258,12 +269,12 @@ void ActivityPanel::on_paint(wxPaintEvent &)
         }
     }
 
-    // Cells.
+    // Cells, using the pre-computed day_start array.
     for (int i = 0; i < 53 * 7; i++) {
         int col = i / 7;
         int row = i % 7;
-        int64_t d = day_at(anchor, col, row);
-        if (d > today_start) continue;  // future cells stay blank
+        int64_t d = cell_day_[col][row];
+        if (d > today_start) continue;
         auto it = counts_.find(d);
         int count = it != counts_.end() ? it->second : 0;
         dc.SetBrush(colour_for_count(bg, count,
@@ -290,9 +301,8 @@ void ActivityPanel::on_motion(wxMouseEvent &e)
         UnsetToolTip(); return;
     }
 
-    int64_t anchor      = heatmap_anchor();
     int64_t today_start = day_start_of((double)time(nullptr));
-    int64_t d           = day_at(anchor, col, row);
+    int64_t d           = cell_day_[col][row];
     if (d > today_start) { UnsetToolTip(); return; }
 
     time_t t = (time_t)d;
