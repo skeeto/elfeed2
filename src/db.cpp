@@ -424,7 +424,8 @@ void db_add_entries(Elfeed *app, std::vector<Entry> &entries)
 }
 
 void db_query_entries(Elfeed *app, const Filter &filter,
-                      std::vector<Entry> &out)
+                      std::vector<Entry> &out,
+                      int default_limit)
 {
     if (!app->db) return;
     out.clear();
@@ -471,8 +472,12 @@ void db_query_entries(Elfeed *app, const Filter &filter,
 
     sql += " ORDER BY e.date DESC, e.namespace, e.id";
 
-    if (filter.limit > 0) {
-        sql += " LIMIT " + std::to_string(filter.limit);
+    // Explicit `#N` in the filter wins; otherwise fall back to
+    // the caller's viewport-derived default (0 = unlimited).
+    int effective_limit =
+        filter.limit > 0 ? filter.limit : default_limit;
+    if (effective_limit > 0) {
+        sql += " LIMIT " + std::to_string(effective_limit);
     }
 
     sqlite3_stmt *stmt;

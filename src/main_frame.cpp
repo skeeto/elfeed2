@@ -416,7 +416,11 @@ void MainFrame::requery()
         sel_id = app_->entries[(size_t)primary].id;
     }
 
-    db_query_entries(app_, app_->current_filter, app_->entries);
+    // Cap the query at viewport-plus-scroll-buffer rows by default
+    // so a live filter keystroke doesn't walk the whole history.
+    // An explicit #N in the filter string still overrides.
+    db_query_entries(app_, app_->current_filter, app_->entries,
+                     list_->desired_row_count());
     list_->refresh_items();
     // Note: activity_ is filter-independent, driven by the DB
     // directly, so a requery (which runs on every filter keystroke)

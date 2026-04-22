@@ -26,6 +26,14 @@ public:
     // Indices of all selected rows, in ascending order.
     std::vector<long> selection() const;
 
+    // How many rows the filter query should aim to produce by
+    // default — derived from the current viewport height, with a
+    // multi-page scroll buffer and safety clamps. Used to bound
+    // live-filter work to "as much as the user can plausibly see"
+    // rather than scanning the full history on every keystroke.
+    // Overridden by an explicit `#N` in the filter expression.
+    int desired_row_count() const;
+
     // Replace the current selection with just `row` (and focus it).
     void select_only(long row);
 

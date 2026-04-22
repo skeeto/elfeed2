@@ -439,3 +439,32 @@ void EntryList::ensure_visible_row(long row)
     if (row < 0 || (size_t)row >= app_->entries.size()) return;
     EnsureVisible(model_->GetItem((unsigned int)row));
 }
+
+int EntryList::desired_row_count() const
+{
+    // Estimate row height from the control's font. wxDataViewCtrl
+    // doesn't expose a reliable "measured row height" when the
+    // view might still be empty (no rendered row to query), and
+    // "char height plus a few pixels of padding" matches what the
+    // generic backend produces on all three platforms closely
+    // enough for our bounding purpose.
+    int row_h = GetCharHeight() + FromDIP(6);
+    if (row_h < 10) row_h = FromDIP(22);
+
+    int client_h = GetClientSize().GetHeight();
+    int visible  = client_h / row_h;
+    if (visible < 1) visible = 1;
+
+    // Scroll buffer: 3× the visible count so a user who flings
+    // the scrollbar down a page or two doesn't land on a
+    // truncated view. Classic-Elfeed "stop once the window is
+    // filled" behaviour scaled up slightly for flickability.
+    int cap = visible * 3;
+    // Floor: narrow windows shouldn't punish the filter (50 rows
+    // is basically free).  Ceiling: stop pathological requests
+    // from ballooning, while still giving explicit `#N` an out
+    // above it (that path overrides this default in db.cpp).
+    if (cap < 50)   cap = 50;
+    if (cap > 2000) cap = 2000;
+    return cap;
+}

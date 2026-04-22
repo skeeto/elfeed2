@@ -237,8 +237,14 @@ void elfeed_shutdown(Elfeed *app);
 void db_open(Elfeed *app);
 void db_close(Elfeed *app);
 void db_add_entries(Elfeed *app, std::vector<Entry> &entries);
+// `default_limit > 0` caps result rows when the filter itself
+// doesn't specify `#N`. Used by the live-listing path to bound
+// work to the visible viewport (plus scroll buffer) — classic
+// Elfeed's "stop once the window is filled" trick. `#N` in the
+// filter still wins when present.
 void db_query_entries(Elfeed *app, const Filter &filter,
-                      std::vector<Entry> &out);
+                      std::vector<Entry> &out,
+                      int default_limit = 0);
 // Fill in authors and enclosures for a single Entry. The listing
 // query deliberately skips these because they're needed only when
 // an entry is actually shown (preview pane) or acted on (download
