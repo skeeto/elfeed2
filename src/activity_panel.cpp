@@ -33,16 +33,18 @@ int64_t ActivityPanel::day_start_of(double epoch)
     return (int64_t)mktime(&tm);
 }
 
-// Monday-of-this-week minus 52 weeks, at local midnight. This is
+// Sunday-of-this-week minus 52 weeks, at local midnight. This is
 // the anchor for column 0 of the heatmap; cell (col,row) represents
-// `anchor + col*7 + row` days (row 0 = Mon, 6 = Sun).
+// `anchor + col*7 + row` days (row 0 = Sun, 6 = Sat). Putting Sun
+// on top bookends the weekend days at the edges of the grid, which
+// makes the weekly-cadence pattern easier to pick out visually.
 static int64_t heatmap_anchor()
 {
     time_t now = time(nullptr);
     struct tm tm{};
     localtime_r(&now, &tm);
-    int dow_mon0 = (tm.tm_wday + 6) % 7;  // Mon=0 … Sun=6
-    tm.tm_mday -= dow_mon0 + 52 * 7;
+    int dow_sun0 = tm.tm_wday;  // 0=Sun … 6=Sat
+    tm.tm_mday -= dow_sun0 + 52 * 7;
     tm.tm_hour  = 0;
     tm.tm_min   = 0;
     tm.tm_sec   = 0;
@@ -74,15 +76,21 @@ static wxColour lerp_colour(wxColour a, wxColour b, double t)
 }
 
 // Discrete 0–4 level for a count, with 0 reserved for empty days.
-// Log compression against max_c so very-busy-day outliers don't
-// flatten everything else to level 1. ceil-with-floor-of-1 ensures
-// any nonzero count is at least level 1, staying distinct from 0.
-static int level_for(int count, int max_c)
+// Scales against a robust roof (scale_max) rather than the absolute
+// max: a single very-busy day shouldn't flatten the rest of the
+// dataset into level 1 just because it outpaces everything else
+// by 10×. Log compression inside the scaled range keeps level-1
+// days visible from empty ones and gives some spread to the quiet
+// half of the distribution. Floor at 1 so any nonzero count stays
+// distinct from 0; cap at 4 so outliers above the scale top out
+// rather than overflowing.
+static int level_for(int count, int scale_max)
 {
     if (count <= 0) return 0;
-    if (max_c <= 1) return 4;
-    double t = std::log(1.0 + (double)count) /
-               std::log(1.0 + (double)max_c);
+    if (scale_max <= 1) return 4;
+    double c = (double)std::min(count, scale_max);
+    double t = std::log(1.0 + c) /
+               std::log(1.0 + (double)scale_max);
     int level = (int)std::lround(t * 4.0);
     if (level < 1) level = 1;
     if (level > 4) level = 4;
@@ -100,13 +108,13 @@ static wxColour colour_for_level(wxColour bg, wxColour fg, int level)
 void ActivityPanel::refresh()
 {
     counts_.clear();
-    max_count_ = 0;
+    scale_max_ = 0;
 
     // Pull *every* entry's date, unfiltered — the heatmap shows
     // reading cadence as a whole, independent of whatever filter
     // the user has active in the listing. Bound the query to the
-    // last ~58 weeks (the heatmap's 53-week window rounded up, so
-    // we include the full Monday-anchored leading week) to avoid
+    // last ~58 weeks (the heatmap's 53-week window rounded up so
+    // we include the full Sunday-anchored leading week) to avoid
     // shipping the full history across for large DBs.
     double cutoff = (double)time(nullptr) - (int64_t)58 * 7 * 86400;
     std::vector<double> dates;
@@ -116,8 +124,22 @@ void ActivityPanel::refresh()
         if (d <= 0) continue;
         counts_[day_start_of(d)]++;
     }
-    for (auto &[day, c] : counts_)
-        max_count_ = std::max(max_count_, c);
+
+    if (!counts_.empty()) {
+        // Robust scale: 3× median of nonzero counts, clipped to the
+        // actual max. Using the median (rather than the max itself)
+        // as the basis keeps the gradient from being distorted by a
+        // single high-count day. Floor at 2 so we always have at
+        // least two useful levels to work with when data is uniform.
+        std::vector<int> nz;
+        nz.reserve(counts_.size());
+        for (auto &[_, c] : counts_) nz.push_back(c);
+        std::sort(nz.begin(), nz.end());
+        int median = nz[nz.size() / 2];
+        int max_c  = nz.back();
+        scale_max_ = std::max(3 * median, 2);
+        if (scale_max_ > max_c) scale_max_ = max_c;
+    }
 
     Refresh();
 }
@@ -176,29 +198,30 @@ void ActivityPanel::on_paint(wxPaintEvent &)
     int64_t anchor     = heatmap_anchor();
     int64_t today_start = day_start_of((double)time(nullptr));
 
-    // Draw day-of-week labels (Mon, Wed, Fri) on rows 0, 2, 4. Two
-    // of three is GitHub's convention; it's enough to orient the
-    // reader without crowding narrow rows with repeating glyphs.
+    // Draw day-of-week labels (Mon, Wed, Fri) at rows 1, 3, 5.
+    // With Sun at row 0 and Sat at row 6, this labels three
+    // alternating weekdays, matching GitHub's two-of-three
+    // convention that orients the reader without crowding rows.
     static const char *day_names[7] = {
-        "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"
+        "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"
     };
     dc.SetTextForeground(faint);
-    for (int r : {0, 2, 4}) {
+    for (int r : {1, 3, 5}) {
         int y = g.grid_y + r * (g.cell + g.gap) +
                 (g.cell - dc.GetCharHeight()) / 2;
         dc.DrawText(day_names[r], 2, y);
     }
 
     // Draw month labels across the top, one per column where that
-    // column's Monday falls in a new month.
+    // column's Sunday (row 0) falls in a new month.
     static const char *month_names[12] = {
         "Jan","Feb","Mar","Apr","May","Jun",
         "Jul","Aug","Sep","Oct","Nov","Dec"
     };
     int prev_month = -1;
     for (int col = 0; col < 53; col++) {
-        int64_t col_monday = day_at(anchor, col, 0);
-        time_t tt = (time_t)col_monday;
+        int64_t col_sunday = day_at(anchor, col, 0);
+        time_t tt = (time_t)col_sunday;
         struct tm tm{};
         localtime_r(&tt, &tm);
         int month = tm.tm_mon;
@@ -210,24 +233,6 @@ void ActivityPanel::on_paint(wxPaintEvent &)
     }
 
     // Cells.
-    if (counts_.empty() || max_count_ == 0) {
-        // Draw the empty skeleton anyway so the user sees the
-        // grid shape even before the first fetch lands.
-        wxColour c0 = colour_for_level(bg, fg, 0);
-        dc.SetBrush(c0);
-        for (int i = 0; i < 53 * 7; i++) {
-            int col = i / 7;
-            int row = i % 7;
-            int64_t d = day_at(anchor, col, row);
-            if (d > today_start) continue;
-            dc.DrawRectangle(
-                g.grid_x + col * (g.cell + g.gap),
-                g.grid_y + row * (g.cell + g.gap),
-                g.cell, g.cell);
-        }
-        return;
-    }
-
     for (int i = 0; i < 53 * 7; i++) {
         int col = i / 7;
         int row = i % 7;
@@ -235,7 +240,7 @@ void ActivityPanel::on_paint(wxPaintEvent &)
         if (d > today_start) continue;  // future cells stay blank
         auto it = counts_.find(d);
         int count = it != counts_.end() ? it->second : 0;
-        int level = level_for(count, max_count_);
+        int level = level_for(count, scale_max_);
         dc.SetBrush(colour_for_level(bg, fg, level));
         dc.DrawRectangle(
             g.grid_x + col * (g.cell + g.gap),
