@@ -483,6 +483,47 @@ void db_query_entries(Elfeed *app, const Filter &filter,
     for (double d : bind_doubles)
         sqlite3_bind_double(stmt, bind_idx++, d);
 
+    // Pre-compile bare and `!` patterns once. The previous code did
+    // `std::regex re(pat, ...)` *inside* the per-entry scan loop,
+    // which compiled the same regex once per candidate row —
+    // easily a one-second stall on a 10k-row filter with a single
+    // bare word. Each pattern tries regex first, falls back to
+    // literal substring if the regex doesn't compile (user typed
+    // something like `c++` or an unbalanced bracket).
+    struct Matcher {
+        bool have_regex = false;
+        std::regex re;
+        std::string literal;
+    };
+    auto build_matchers =
+        [](const std::vector<std::string> &pats) {
+        std::vector<Matcher> out;
+        out.reserve(pats.size());
+        for (auto &p : pats) {
+            Matcher m;
+            m.literal = p;
+            try {
+                m.re = std::regex(p, std::regex_constants::icase);
+                m.have_regex = true;
+            } catch (...) {
+                m.have_regex = false;
+            }
+            out.push_back(std::move(m));
+        }
+        return out;
+    };
+    std::vector<Matcher> match_matchers     = build_matchers(filter.matches);
+    std::vector<Matcher> not_match_matchers = build_matchers(filter.not_matches);
+    auto matches_in = [](const Matcher &m,
+                         const std::string &title,
+                         const std::string &link) {
+        if (m.have_regex)
+            return std::regex_search(title, m.re) ||
+                   std::regex_search(link,  m.re);
+        return title.find(m.literal) != std::string::npos ||
+               link.find(m.literal)  != std::string::npos;
+    };
+
     // Per-entry lookup statements (tags, authors, enclosures).
     const char *tags_sql =
         "SELECT tag FROM entry_tag WHERE namespace=? AND entry_id=? ORDER BY tag";
@@ -561,43 +602,20 @@ void db_query_entries(Elfeed *app, const Filter &filter,
             }
         }
 
-        // In-memory regex filtering
+        // In-memory regex filtering. Matchers are pre-compiled
+        // above the scan loop.
         bool keep = true;
-
-        // Title/link match (bare regex terms)
-        for (auto &pat : filter.matches) {
-            try {
-                std::regex re(pat, std::regex_constants::icase);
-                if (!std::regex_search(e.title, re) &&
-                    !std::regex_search(e.link, re)) {
-                    keep = false;
-                    break;
-                }
-            } catch (...) {
-                if (e.title.find(pat) == std::string::npos &&
-                    e.link.find(pat) == std::string::npos) {
-                    keep = false;
-                    break;
-                }
+        for (auto &m : match_matchers) {
+            if (!matches_in(m, e.title, e.link)) {
+                keep = false;
+                break;
             }
         }
-
-        // Title/link NOT match
         if (keep) {
-            for (auto &pat : filter.not_matches) {
-                try {
-                    std::regex re(pat, std::regex_constants::icase);
-                    if (std::regex_search(e.title, re) ||
-                        std::regex_search(e.link, re)) {
-                        keep = false;
-                        break;
-                    }
-                } catch (...) {
-                    if (e.title.find(pat) != std::string::npos ||
-                        e.link.find(pat) != std::string::npos) {
-                        keep = false;
-                        break;
-                    }
+            for (auto &m : not_match_matchers) {
+                if (matches_in(m, e.title, e.link)) {
+                    keep = false;
+                    break;
                 }
             }
         }
