@@ -29,6 +29,12 @@ public:
     // Replace the current selection with just `row` (and focus it).
     void select_only(long row);
 
+    // Replace the current selection with the contiguous range
+    // [lo, hi] inclusive, focusing `primary` (which should be within
+    // that range). Used by the visual-selection mode in MainFrame
+    // to extend a range from the anchor row to the current cursor.
+    void select_range(long lo, long hi, long primary);
+
     // Scroll `row` into view if it isn't already.
     void ensure_visible_row(long row);
 

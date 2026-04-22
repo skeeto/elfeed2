@@ -380,6 +380,11 @@ void MainFrame::bind_events()
 
 void MainFrame::requery()
 {
+    // Row indices are about to change; the old anchor no longer
+    // points to the same entry. Exit visual mode silently — the
+    // user's selection will be re-homed by the ns/id lookup below.
+    visual_anchor_ = -1;
+
     std::string sel_ns, sel_id;
     long primary = list_->primary();
     if (primary >= 0 && (size_t)primary < app_->entries.size()) {
@@ -915,6 +920,21 @@ void MainFrame::on_list_key(wxKeyEvent &e)
         list_->SelectAll();
         return;
     }
+    // Escape: two-stage reset. If visual-selection mode is on, the
+    // first press exits it (leaves the range selected, in case the
+    // user still wants to act on it). The next press, with no
+    // anchor active, collapses the multi-selection back to just
+    // the focused row — the "Clear selection" affordance.
+    if (code == WXK_ESCAPE && plain) {
+        if (visual_anchor_ >= 0) {
+            visual_anchor_ = -1;
+            flash_status("Visual selection off");
+        } else {
+            long p = list_->primary();
+            if (p >= 0) list_->select_only(p);
+        }
+        return;
+    }
     switch (code) {
     case 'J': if (plain) { move_selection(+1); return; } break;
     case 'K': if (plain) { move_selection(-1); return; } break;
@@ -931,6 +951,27 @@ void MainFrame::on_list_key(wxKeyEvent &e)
     case 'Y': if (plain) { action_copy_link();        return; } break;
     case 'D': if (plain) { action_download();         return; } break;
     case 'F': if (plain) { fetch_all(app_); update_status(); return; } break;
+    case 'V':
+        // Visual-selection mode. Entering anchors at the focused
+        // row so subsequent j/k/g/G extend the selection as a
+        // contiguous range; exiting (v again, Escape, or any row
+        // action) clears the anchor. Starts fresh on entry — any
+        // prior multi-selection collapses to just the anchor row.
+        if (plain) {
+            if (visual_anchor_ >= 0) {
+                visual_anchor_ = -1;
+                flash_status("Visual selection off");
+            } else {
+                long p = list_->primary();
+                if (p >= 0) {
+                    visual_anchor_ = p;
+                    list_->select_only(p);
+                    flash_status("Visual selection");
+                }
+            }
+            return;
+        }
+        break;
     case 'S':
     case '/':
         if (plain) {
@@ -1015,7 +1056,13 @@ void MainFrame::move_selection(int delta)
     if (p < 0) return;
     long target = p + delta;
     if (target < 0 || target >= n) return;
-    list_->select_only(target);
+    if (visual_anchor_ >= 0) {
+        long lo = std::min(visual_anchor_, target);
+        long hi = std::max(visual_anchor_, target);
+        list_->select_range(lo, hi, target);
+    } else {
+        list_->select_only(target);
+    }
     list_->ensure_visible_row(target);
 }
 
@@ -1023,7 +1070,13 @@ void MainFrame::go_to(long row)
 {
     long n = (long)app_->entries.size();
     if (row < 0 || row >= n) return;
-    list_->select_only(row);
+    if (visual_anchor_ >= 0) {
+        long lo = std::min(visual_anchor_, row);
+        long hi = std::max(visual_anchor_, row);
+        list_->select_range(lo, hi, row);
+    } else {
+        list_->select_only(row);
+    }
     list_->ensure_visible_row(row);
 }
 
@@ -1068,6 +1121,7 @@ void MainFrame::action_mark_read()
         list_->refresh_row(i);
     }
     if (sel.size() == 1) advance_from(sel[0]);
+    visual_anchor_ = -1;
     update_status();
 }
 
@@ -1081,6 +1135,7 @@ void MainFrame::action_mark_unread()
         list_->refresh_row(i);
     }
     if (sel.size() == 1) advance_from(sel[0]);
+    visual_anchor_ = -1;
     update_status();
 }
 
@@ -1098,6 +1153,7 @@ void MainFrame::action_open_in_browser()
         list_->refresh_row(i);
     }
     if (sel.size() == 1) advance_from(sel[0]);
+    visual_anchor_ = -1;
     update_status();
 }
 
@@ -1130,6 +1186,7 @@ void MainFrame::action_copy_link()
     else
         flash_status(wxString::Format("Copied %zu URLs to clipboard",
                                       urls.size()));
+    visual_anchor_ = -1;
 }
 
 void MainFrame::action_download()
@@ -1169,5 +1226,6 @@ void MainFrame::action_download()
     download_tick(app_);
     if (pane_shown("downloads") && downloads_) downloads_->refresh();
     if (sel.size() == 1) advance_from(sel[0]);
+    visual_anchor_ = -1;
     update_status();
 }

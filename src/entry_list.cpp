@@ -421,6 +421,19 @@ void EntryList::select_only(long row)
     SetCurrentItem(item);
 }
 
+void EntryList::select_range(long lo, long hi, long primary)
+{
+    long n = (long)app_->entries.size();
+    if (lo < 0) lo = 0;
+    if (hi >= n) hi = n - 1;
+    if (lo > hi) return;
+    UnselectAll();
+    for (long r = lo; r <= hi; r++)
+        Select(model_->GetItem((unsigned int)r));
+    if (primary >= lo && primary <= hi)
+        SetCurrentItem(model_->GetItem((unsigned int)primary));
+}
+
 void EntryList::ensure_visible_row(long row)
 {
     if (row < 0 || (size_t)row >= app_->entries.size()) return;

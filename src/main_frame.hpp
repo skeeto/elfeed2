@@ -119,6 +119,14 @@ private:
     int menu_downloads_id_ = 0;
     int menu_activity_id_ = 0;
 
+    // -1 when not in visual-selection mode. Otherwise the row that
+    // was focused when the user pressed `v`: subsequent j/k/g/G
+    // keep extending the list selection between this anchor and the
+    // new cursor position. Cleared by Escape, by any row-acting
+    // action (mark read/unread/open/copy/download), and by requery
+    // (which invalidates row indices).
+    long visual_anchor_ = -1;
+
     // Snapshot of the AUI perspective right after build_widgets has
     // applied the construction-time defaults but before any saved
     // perspective is loaded. Reset-layout restores this exact state.

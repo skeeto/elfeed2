@@ -198,7 +198,10 @@ Age units: `year`/`y`, `month`/`M`, `week`/`w`, `day`/`d`, `hour`/`h`,
 | `D`         | Toggle downloads panel                   |
 | `Escape`    | Clear selection                          |
 
-Visual selection (`v`) extends `u`, `r`, `b`, `y` to operate on a range.
+Visual selection (`v`) anchors at the focused row; subsequent `j`, `k`,
+`g`, `G` extend the selection from the anchor to the new cursor. Any
+row-acting key (`u`, `r`, `b`, `y`, `d`) runs against the whole range
+and then exits visual mode; `Escape` or `v` again also exits.
 
 ### Filter editing keys
 
