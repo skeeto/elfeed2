@@ -119,12 +119,18 @@ void EntryDetail::focus_body()
 
 void EntryDetail::scroll_lines(int lines)
 {
-    // wxHtmlWindow inherits from wxScrolled, which exposes
-    // ScrollLines: positive = down, negative = up. A "line" here
-    // is the window's configured vertical scroll unit (pixels per
-    // unit), which wxHtmlWindow sets to roughly one text line on
-    // SetPage. That matches what vi users expect from j/k.
-    if (body_) body_->ScrollLines(lines);
+    // Drive the scroll the same way wxScrolled's native arrow-key
+    // handler does: read the current view start and Scroll() to a
+    // new row. wxHtmlWindow's ScrollLines() can no-op depending on
+    // how its internal scroll rate ends up configured — Scroll()
+    // moves a scroll unit reliably, which is also what WXK_DOWN /
+    // WXK_UP produce for a single press.
+    if (!body_ || lines == 0) return;
+    int vx = 0, vy = 0;
+    body_->GetViewStart(&vx, &vy);
+    int new_vy = vy + lines;
+    if (new_vy < 0) new_vy = 0;
+    body_->Scroll(vx, new_vy);
 }
 
 void EntryDetail::show_entry(const Entry *e)
