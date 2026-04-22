@@ -90,8 +90,16 @@ public:
     }
 
     wxSize GetSize() const override {
+        // Measure with the same weight Render() will use, otherwise
+        // the framework reserves a too-narrow cell and truncates
+        // bold rows ("2026...21"). GetAttr is populated by the
+        // framework before this call, same as in Render.
+        wxFont f = font_for_view();
+        const wxDataViewItemAttr &attr = GetAttr();
+        if (attr.GetBold())   f.MakeBold();
+        if (attr.GetItalic()) f.MakeItalic();
         wxScreenDC dc;
-        dc.SetFont(font_for_view());
+        dc.SetFont(f);
         return dc.GetTextExtent(value_);
     }
 
