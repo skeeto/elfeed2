@@ -11,6 +11,7 @@ class EntryDetail;
 class FeedsPanel;
 class LogPanel;
 class DownloadsPanel;
+class ActivityPanel;
 class wxSearchCtrl;
 class wxDataViewEvent;
 class wxAuiManagerEvent;
@@ -83,6 +84,7 @@ private:
     void on_toggle_preview(wxCommandEvent &);
     void on_toggle_log(wxCommandEvent &);
     void on_toggle_downloads(wxCommandEvent &);
+    void on_toggle_activity(wxCommandEvent &);
     void on_reset_layout(wxCommandEvent &);
     void on_about(wxCommandEvent &);
     void on_quit(wxCommandEvent &);
@@ -109,11 +111,13 @@ private:
     FeedsPanel *feeds_ = nullptr;
     LogPanel *log_ = nullptr;
     DownloadsPanel *downloads_ = nullptr;
+    ActivityPanel *activity_ = nullptr;
 
     int menu_feeds_id_ = 0;
     int menu_preview_id_ = 0;
     int menu_log_id_ = 0;
     int menu_downloads_id_ = 0;
+    int menu_activity_id_ = 0;
 
     // Snapshot of the AUI perspective right after build_widgets has
     // applied the construction-time defaults but before any saved

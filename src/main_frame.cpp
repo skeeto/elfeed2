@@ -1,5 +1,6 @@
 #include "main_frame.hpp"
 
+#include "activity_panel.hpp"
 #include "downloads_panel.hpp"
 #include "elfeed_import.hpp"
 #include "entry_detail.hpp"
@@ -38,6 +39,7 @@ enum {
     ID_TogglePreview,
     ID_ToggleLog,
     ID_ToggleDownloads,
+    ID_ToggleActivity,
     ID_ResetLayout,
 };
 
@@ -170,6 +172,8 @@ void MainFrame::build_menus()
         m_view->AppendCheckItem(ID_ToggleLog,       "&Log")->GetId();
     menu_downloads_id_ =
         m_view->AppendCheckItem(ID_ToggleDownloads, "&Downloads")->GetId();
+    menu_activity_id_ =
+        m_view->AppendCheckItem(ID_ToggleActivity,  "&Activity")->GetId();
     m_view->AppendSeparator();
     m_view->Append(ID_ResetLayout, "&Reset Layout");
     mbar->Append(m_view, "&View");
@@ -220,6 +224,7 @@ void MainFrame::build_widgets()
                                 });
     log_       = new LogPanel(aui_host, app_);
     downloads_ = new DownloadsPanel(aui_host, app_);
+    activity_  = new ActivityPanel(aui_host, app_);
 
     // Default layout at the 1500x900 default client size:
     //   Feeds   left   250 px (1/6 of width), full height
@@ -280,6 +285,14 @@ void MainFrame::build_widgets()
                      .Layer(0)
                      .MinSize(FromDIP(wxSize(-1, 200)))
                      .Hide());
+    mgr_.AddPane(activity_,
+                 wxAuiPaneInfo()
+                     .Name("activity")
+                     .Caption("Activity")
+                     .Bottom()
+                     .Layer(0)
+                     .MinSize(FromDIP(wxSize(-1, 140)))
+                     .Hide());
 
     // Run an initial Update with just the construction-time defaults
     // so wxAUI computes dock_size entries from the MinSize hints
@@ -307,7 +320,7 @@ void MainFrame::loosen_pane_min_sizes()
 {
     const wxSize floor = FromDIP(wxSize(40, 40));
     for (const char *name :
-         {"feeds", "entry_detail", "downloads", "log"}) {
+         {"feeds", "entry_detail", "downloads", "log", "activity"}) {
         wxAuiPaneInfo &pi = mgr_.GetPane(name);
         if (pi.IsOk()) pi.MinSize(floor);
     }
@@ -323,6 +336,7 @@ void MainFrame::bind_events()
     Bind(wxEVT_MENU, &MainFrame::on_toggle_preview,   this, ID_TogglePreview);
     Bind(wxEVT_MENU, &MainFrame::on_toggle_log,       this, ID_ToggleLog);
     Bind(wxEVT_MENU, &MainFrame::on_toggle_downloads, this, ID_ToggleDownloads);
+    Bind(wxEVT_MENU, &MainFrame::on_toggle_activity,  this, ID_ToggleActivity);
     Bind(wxEVT_MENU, &MainFrame::on_reset_layout,     this, ID_ResetLayout);
     Bind(wxEVT_MENU, &MainFrame::on_about, this, wxID_ABOUT);
     Bind(wxEVT_MENU, &MainFrame::on_quit,  this, wxID_EXIT);
@@ -366,6 +380,7 @@ void MainFrame::requery()
 
     db_query_entries(app_, app_->current_filter, app_->entries);
     list_->refresh_items();
+    if (activity_) activity_->refresh();
 
     long new_primary = -1;
     if (!sel_ns.empty()) {
@@ -449,6 +464,7 @@ void MainFrame::update_menu_checks()
     mbar->Check(menu_preview_id_,   pane_shown("entry_detail"));
     mbar->Check(menu_log_id_,       pane_shown("log"));
     mbar->Check(menu_downloads_id_, pane_shown("downloads"));
+    mbar->Check(menu_activity_id_,  pane_shown("activity"));
 }
 
 void MainFrame::toggle_pane(const char *name)
@@ -515,6 +531,7 @@ void MainFrame::on_wake(wxThreadEvent &)
     download_tick(app_);
     if (pane_shown("log")       && log_)       log_->refresh();
     if (pane_shown("downloads") && downloads_) downloads_->refresh();
+    if (pane_shown("activity")  && activity_)  activity_->refresh();
 }
 
 void MainFrame::on_filter_text(wxCommandEvent &)
@@ -615,6 +632,7 @@ void MainFrame::on_toggle_feeds(wxCommandEvent &)     { toggle_pane("feeds"); }
 void MainFrame::on_toggle_preview(wxCommandEvent &)   { toggle_pane("entry_detail"); }
 void MainFrame::on_toggle_log(wxCommandEvent &)       { toggle_pane("log"); }
 void MainFrame::on_toggle_downloads(wxCommandEvent &) { toggle_pane("downloads"); }
+void MainFrame::on_toggle_activity(wxCommandEvent &)  { toggle_pane("activity"); }
 
 void MainFrame::on_reset_layout(wxCommandEvent &)
 {

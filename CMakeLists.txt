@@ -124,6 +124,7 @@ set(elfeed_sources
   src/feeds_panel.cpp
   src/log_panel.cpp
   src/downloads_panel.cpp
+  src/activity_panel.cpp
   src/db.cpp
   src/feed.cpp
   src/filter.cpp
