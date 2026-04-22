@@ -849,11 +849,23 @@ void MainFrame::on_close(wxCloseEvent &)
 
 void MainFrame::on_pane_close(wxAuiManagerEvent &e)
 {
-    // wxAUI just closed a pane via its X button. Our menu check marks
-    // still reflect the pre-close state; refresh them on the next idle
-    // tick (after the pane info has actually flipped).
-    (void)e;
-    CallAfter([this] { update_menu_checks(); });
+    // wxAUI is closing a pane via its X button. The pane's IsShown()
+    // flag doesn't reliably flip until after this event returns AND
+    // wxAUI's internal Update() runs, so polling it (even via
+    // CallAfter) can read stale state. Instead, read GetPane() to
+    // learn which pane is closing and uncheck its menu directly —
+    // we know the state unconditionally at this point.
+    wxAuiPaneInfo *pane = e.GetPane();
+    auto *mbar = GetMenuBar();
+    if (pane && mbar) {
+        wxString name = pane->name;
+        if      (name == "feeds")        mbar->Check(menu_feeds_id_,     false);
+        else if (name == "entry_detail") mbar->Check(menu_preview_id_,   false);
+        else if (name == "log")          mbar->Check(menu_log_id_,       false);
+        else if (name == "downloads")    mbar->Check(menu_downloads_id_, false);
+        else if (name == "activity")     mbar->Check(menu_activity_id_,  false);
+    }
+    e.Skip();
 }
 
 void MainFrame::on_list_selected(wxDataViewEvent &)
