@@ -50,6 +50,13 @@ if(ELFEED2_USE_CCACHE)
         "${CMAKE_COMMAND}" "-E" "env"
         "CCACHE_SLOPPINESS=pch_defines,time_macros,include_file_mtime,include_file_ctime"
         "${CCACHE_PROGRAM}")
+    # Tell FetchWxWidgets to disable wx's per-target PCH. PCH speeds
+    # up cold wx builds by ~30%, but the .pch binary embeds a
+    # timestamp nonce that ccache treats as an extra-file mismatch
+    # — so without this every clean build's wx compiles miss
+    # ccache. Off only when ccache is in play; pipeline / no-cache
+    # builds keep PCH on for the cold-build speedup.
+    set(ELFEED2_CCACHE_ACTIVE TRUE)
   else()
     message(STATUS "ccache: not found")
   endif()

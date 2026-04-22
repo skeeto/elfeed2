@@ -64,15 +64,21 @@ set(wxUSE_HELP                   OFF CACHE BOOL "" FORCE)  # help system
 set(wxUSE_WXHTML_HELP            OFF CACHE BOOL "" FORCE)  # html-based help
 set(wxUSE_DEBUGREPORT            OFF CACHE BOOL "" FORCE)  # crash reports
 
-# Disable wx's per-target precompiled headers. PCH speeds up the
-# first wx build by ~30%, but the .pch binary embeds a timestamp
-# nonce that ccache treats as an extra-file mismatch — so every
-# fresh build's wx compiles miss the cache regardless of
-# pch_defines/include_file_mtime sloppiness. Net wins go to
-# ccache for our use pattern (iterate, occasionally rm -rf
-# build): cold first build is a bit slower without PCH, every
-# subsequent clean build is much faster with cached objects.
-set(wxBUILD_PRECOMP              OFF CACHE BOOL "" FORCE)
+# Disable wx's per-target precompiled headers ONLY when ccache is
+# active (CMakeLists sets ELFEED2_CCACHE_ACTIVE for us). Rationale:
+# the .pch binary embeds a timestamp nonce that ccache treats as
+# an extra-file mismatch — so every fresh build's wx compiles
+# miss the cache regardless of pch_defines/include_file_mtime
+# sloppiness. With ccache, off wins (first cold build slower by
+# ~30%, but every subsequent clean build hits cache at near-100%).
+# Without ccache (pipeline builds, fresh checkouts), PCH on is
+# faster, period.
+if(ELFEED2_CCACHE_ACTIVE)
+  # wxBUILD_PRECOMP is declared by wx as a STRING (ON/OFF/COTIRE),
+  # NOT a BOOL — `CACHE BOOL` here is silently ignored because the
+  # existing cache type doesn't match.
+  set(wxBUILD_PRECOMP            "OFF" CACHE STRING "" FORCE)
+endif()
 
 # The release tarball includes all bundled third-party sources inline
 # (zlib, libpng, libjpeg, libtiff, expat, …), so unlike the git repo
