@@ -202,3 +202,37 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
   target_include_directories(elfeed2 SYSTEM PRIVATE
     $<TARGET_PROPERTY:wx::core,INTERFACE_INCLUDE_DIRECTORIES>)
 endif()
+
+# --- Packaging (CPack) ---
+# `cmake --build build --target package` produces a release artifact:
+#   macOS:   elfeed2-<ver>-macos-arm64.dmg   (drag the .app to
+#            Applications)
+#   Windows: not produced here; the release pipeline cross-builds
+#            the .exe via the mingw toolchain, signs it, and zips it
+#            with README.md after. See .github/workflows/release.yml.
+
+# Pin our install rule to its own component so CPack can restrict
+# the DMG to it. Without this, mbedTLS / pugixml subprojects' own
+# install rules run too and dump include/ and lib/ into the DMG.
+install(TARGETS elfeed2
+  RUNTIME DESTINATION . COMPONENT app
+  BUNDLE  DESTINATION . COMPONENT app
+)
+
+set(CPACK_PACKAGE_NAME    "elfeed2")
+set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
+if(APPLE)
+  set(CPACK_GENERATOR "DragNDrop")
+  set(CPACK_PACKAGE_FILE_NAME "elfeed2-${PROJECT_VERSION}-macos-arm64")
+  set(CPACK_DMG_VOLUME_NAME   "Elfeed2")
+  # Force APFS instead of CMake's default HFS+. On macOS Sequoia
+  # (15.x), `hdiutil create -fs HFS+` from an APFS source volume
+  # produces a silently corrupt DMG that fails to verify. APFS DMG
+  # creation works reliably. CPACK_DMG_FILESYSTEM is honored by
+  # CMake 3.20+.
+  set(CPACK_DMG_FILESYSTEM "APFS")
+  # Limit the DMG to our `app` component — keeps subproject
+  # install leftovers (mbedTLS headers / static libs) out.
+  set(CPACK_COMPONENTS_ALL "app")
+endif()
+include(CPack)

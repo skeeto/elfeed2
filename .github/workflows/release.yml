@@ -1,0 +1,185 @@
+name: Release
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  verify-version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check CMakeLists.txt PROJECT_VERSION matches tag
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          BASE_VERSION=${VERSION%-rc*}
+          CMAKE_VERSION=$(grep -Po 'project\(elfeed2 VERSION \K[^ ]+' CMakeLists.txt)
+          if [[ "$BASE_VERSION" != "$CMAKE_VERSION" ]]; then
+            echo "::error::tag v$VERSION does not match CMakeLists.txt PROJECT_VERSION ($CMAKE_VERSION)"
+            exit 1
+          fi
+
+  build-macos:
+    needs: verify-version
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      # Cache the FetchContent output (wxWidgets, mbedTLS, sqlite,
+      # pugixml, cpp-httplib) so the slow first-build cost amortizes
+      # across runs. ImageVersion is GitHub's per-runner-image
+      # identifier — bumps when the macos-14 image is refreshed
+      # (toolchain version moves with it).
+      - name: Cache _deps
+        uses: actions/cache@v4
+        with:
+          path: build/_deps
+          key: deps-macos-${{ runner.os }}-${{ env.ImageVersion }}-${{ hashFiles('cmake/Fetch*.cmake') }}
+          restore-keys: |
+            deps-macos-${{ runner.os }}-${{ env.ImageVersion }}-
+
+      - name: Configure
+        run: |
+          cmake -B build -S . \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
+
+      - name: Build
+        # -j 2 keeps memory pressure manageable on the 14 GB mac-14
+        # runner; cached _deps means second-run cost is small even
+        # at low parallelism. See build-windows for the swap-
+        # thrashing failure mode this avoids.
+        run: cmake --build build --config Release -j 2
+
+      - name: Package (DMG)
+        run: cmake --build build --target package
+
+      - name: Upload DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: elfeed2-macos
+          path: build/elfeed2-*-macos-arm64.dmg
+          if-no-files-found: error
+
+  build-windows:
+    needs: verify-version
+    # Cross-compile from Linux with mingw-w64 — no Windows runner
+    # needed. Resulting .exe statically links libstdc++ / libgcc /
+    # winpthread (see cmake/Toolchain-Mingw64.cmake), so the
+    # binary depends only on system Win32 DLLs.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install mingw-w64
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mingw-w64
+
+      # Toolchain file is part of the cache key — changing the
+      # mingw flags would otherwise silently reuse incompatible
+      # objects. ImageVersion bumps when the ubuntu image rolls
+      # (apt-installed mingw moves with it).
+      - name: Cache _deps
+        uses: actions/cache@v4
+        with:
+          path: build/_deps
+          key: deps-mingw-${{ runner.os }}-${{ env.ImageVersion }}-${{ hashFiles('cmake/Fetch*.cmake', 'cmake/Toolchain-Mingw64.cmake') }}
+          restore-keys: |
+            deps-mingw-${{ runner.os }}-${{ env.ImageVersion }}-
+
+      - name: Configure
+        run: |
+          cmake -B build -S . \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_TOOLCHAIN_FILE=cmake/Toolchain-Mingw64.cmake
+
+      - name: Build
+        # -j 2 instead of -j (= 4) on the 7 GB ubuntu-latest runner.
+        # Default parallelism causes wxWidgets compiles to thrash
+        # swap and stall the build past the runner's stuck-detection
+        # window, which reads as a phantom cancellation at 88%.
+        run: cmake --build build -j 2
+
+      - name: Upload unsigned exe
+        uses: actions/upload-artifact@v4
+        with:
+          name: elfeed2-windows-exe
+          path: build/elfeed2.exe
+          if-no-files-found: error
+
+  release:
+    needs: [build-macos, build-windows]
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write   # gh release create
+      id-token: write   # aas-sign OIDC handshake
+    steps:
+      - uses: actions/checkout@v4   # for README.md
+
+      - name: Download macOS DMG
+        uses: actions/download-artifact@v4
+        with:
+          name: elfeed2-macos
+          path: dist
+
+      - name: Download Windows exe
+        uses: actions/download-artifact@v4
+        with:
+          name: elfeed2-windows-exe
+          path: dist-windows
+
+      - name: Sign elfeed2.exe
+        uses: skeeto/aas-sign@v0.4.0
+        with:
+          endpoint:  ${{ secrets.TRUSTED_SIGNING_ENDPOINT }}
+          account:   ${{ secrets.TRUSTED_SIGNING_ACCOUNT }}
+          profile:   ${{ secrets.CERTIFICATE_PROFILE }}
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          files: dist-windows/elfeed2.exe
+
+      - name: Assemble Windows ZIP, rename for -rc tags
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          BASE_VERSION=${VERSION%-rc*}
+
+          # Zip the signed exe + README.md at archive root.
+          STAGE=$(mktemp -d)
+          cp dist-windows/elfeed2.exe "$STAGE/"
+          cp README.md "$STAGE/"
+          (cd "$STAGE" && zip -r "$GITHUB_WORKSPACE/dist/elfeed2-${BASE_VERSION}-windows-x64.zip" elfeed2.exe README.md)
+
+          # For -rc tags, rename both artifacts so user-facing
+          # download filenames carry the full tag version. CPack only
+          # knows PROJECT_VERSION (the base).
+          if [[ "$VERSION" != "$BASE_VERSION" ]]; then
+            mv "dist/elfeed2-${BASE_VERSION}-macos-arm64.dmg" \
+               "dist/elfeed2-${VERSION}-macos-arm64.dmg"
+            mv "dist/elfeed2-${BASE_VERSION}-windows-x64.zip" \
+               "dist/elfeed2-${VERSION}-windows-x64.zip"
+          fi
+          ls -l dist/
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          # Tags like vX.Y.Z-rcN are pipeline-test runs: publish as a
+          # draft prerelease so they don't trigger release immutability
+          # and can be deleted/retried freely.
+          FLAGS=()
+          if [[ "$VERSION" == *-rc* ]]; then
+            FLAGS+=(--draft --prerelease)
+          fi
+          gh release create "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$VERSION" \
+            "${FLAGS[@]}" \
+            "dist/elfeed2-${VERSION}-macos-arm64.dmg" \
+            "dist/elfeed2-${VERSION}-windows-x64.zip"
