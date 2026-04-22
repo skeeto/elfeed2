@@ -3,6 +3,8 @@
 
 #include <wx/button.h>
 #include <wx/checkbox.h>
+#include <wx/clipbrd.h>
+#include <wx/menu.h>
 #include <wx/sizer.h>
 #include <wx/variant.h>
 
@@ -120,6 +122,8 @@ LogPanel::LogPanel(wxWindow *parent, Elfeed *app)
                 });
     list_->Bind(wxEVT_DATAVIEW_COLUMN_SORTED,
                 &LogPanel::on_sort, this);
+    list_->Bind(wxEVT_DATAVIEW_ITEM_CONTEXT_MENU,
+                &LogPanel::on_context_menu, this);
     vsz->Add(list_, 1, wxEXPAND);
 
     SetSizer(vsz);
@@ -227,6 +231,63 @@ void LogPanel::on_sort(wxDataViewEvent &)
     model_->Reset((unsigned int)snapshot_.size());
     db_save_ui_state(app_, "sort.log",
                      dataview_serialize_sort(list_).c_str());
+}
+
+void LogPanel::on_context_menu(wxDataViewEvent &event)
+{
+    wxDataViewItem item = event.GetItem();
+    if (!item.IsOk()) return;
+    if (!list_->IsSelected(item)) {
+        list_->UnselectAll();
+        list_->Select(item);
+    }
+
+    // Whether to enable Copy depends on having a selection — empty
+    // selection (right-click on empty area) shouldn't be reachable
+    // here since item.IsOk() above would have returned false.
+    enum { ID_Copy = wxID_HIGHEST + 1, ID_Clear };
+    wxMenu menu;
+    menu.Append(ID_Copy,  "&Copy");
+    menu.AppendSeparator();
+    menu.Append(ID_Clear, "Clear &Log");
+
+    int choice = list_->GetPopupMenuSelectionFromUser(menu);
+    if (choice == ID_Copy) {
+        // Stitch the selected rows into a clipboard string. Each
+        // line is "<datetime> [<kind>] <message>" — same shape as
+        // the panel itself, so what you copy reads like what you
+        // see. Cell alignment isn't preserved, but a textual log
+        // pasted into a chat or issue tracker doesn't need that.
+        wxDataViewItemArray sel;
+        list_->GetSelections(sel);
+        std::string out;
+        for (auto &it : sel) {
+            unsigned r = model_->GetRow(it);
+            if (r >= snapshot_.size()) continue;
+            const LogEntry &e = snapshot_[r];
+            const char *kind = "?";
+            switch (e.kind) {
+            case LOG_INFO:    kind = "info"; break;
+            case LOG_REQUEST: kind = "req";  break;
+            case LOG_SUCCESS: kind = "ok";   break;
+            case LOG_ERROR:   kind = "err";  break;
+            }
+            if (!out.empty()) out += '\n';
+            out += format_datetime(e.time);
+            out += " [";
+            out += kind;
+            out += "] ";
+            out += e.message;
+        }
+        if (!out.empty() && wxTheClipboard->Open()) {
+            wxTheClipboard->SetData(
+                new wxTextDataObject(wxString::FromUTF8(out)));
+            wxTheClipboard->Close();
+        }
+    } else if (choice == ID_Clear) {
+        wxCommandEvent dummy;
+        on_clear(dummy);
+    }
 }
 
 void LogPanel::on_filter_changed(wxCommandEvent &)

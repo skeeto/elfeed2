@@ -40,6 +40,7 @@ private:
     void on_pause(wxCommandEvent &);
     void on_remove(wxCommandEvent &);
     void on_sort(wxDataViewEvent &);
+    void on_context_menu(wxDataViewEvent &);
 
     // Sort snapshot_ in place per the current column header state.
     // Called from refresh() when a non-default sort is active.

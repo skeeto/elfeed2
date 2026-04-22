@@ -318,6 +318,8 @@ void MainFrame::bind_events()
                 &MainFrame::on_list_selected, this);
     list_->Bind(wxEVT_DATAVIEW_ITEM_ACTIVATED,
                 &MainFrame::on_list_activated, this);
+    list_->Bind(wxEVT_DATAVIEW_ITEM_CONTEXT_MENU,
+                &MainFrame::on_list_context_menu, this);
     list_->Bind(wxEVT_CHAR_HOOK, &MainFrame::on_list_key, this);
 }
 
@@ -748,6 +750,83 @@ void MainFrame::on_list_selected(wxDataViewEvent &)
 void MainFrame::on_list_activated(wxDataViewEvent &)
 {
     action_mark_read();
+}
+
+void MainFrame::on_list_context_menu(wxDataViewEvent &event)
+{
+    // Right-click on empty space (no row): nothing to act on.
+    wxDataViewItem item = event.GetItem();
+    if (!item.IsOk()) return;
+
+    // If the user right-clicks a row outside the current selection,
+    // make that the selection — same pattern FeedsPanel uses.
+    // Otherwise the menu would dispatch against whatever the user
+    // had selected before, which is rarely what they meant. Also
+    // refresh the preview pane: programmatic Select doesn't fire
+    // wxEVT_DATAVIEW_SELECTION_CHANGED, so on_list_selected won't
+    // run for us.
+    if (!list_->IsSelected(item)) {
+        list_->UnselectAll();
+        list_->Select(item);
+        list_->SetCurrentItem(item);
+        long p = list_->primary();
+        if (p >= 0 && (size_t)p < app_->entries.size())
+            detail_->show_entry(&app_->entries[(size_t)p]);
+    }
+
+    auto sel = list_->selection();
+    bool any_enclosure = false;
+    for (long i : sel) {
+        if (i >= 0 && (size_t)i < app_->entries.size() &&
+            !app_->entries[(size_t)i].enclosures.empty()) {
+            any_enclosure = true;
+            break;
+        }
+    }
+
+    enum {
+        ID_Browser = wxID_HIGHEST + 1,
+        ID_CopyLink,
+        ID_MarkRead,
+        ID_MarkUnread,
+        ID_Download,
+        ID_FilterFeed,
+    };
+
+    // \tKey makes wxWidgets right-align the shortcut hint native-
+    // style — same convention the main menu uses for "Quit\tCtrl+Q"
+    // and the feeds-panel context menu uses for the copy actions.
+    // Bare letters (b, y, r, u, d) are display-only here; the
+    // actual keystrokes go through on_list_key.
+    wxMenu menu;
+    menu.Append(ID_Browser,    "Open in &Browser\tb");
+    menu.Append(ID_CopyLink,   "&Copy Link\ty");
+    menu.AppendSeparator();
+    menu.Append(ID_MarkRead,   "Mark as &Read\tr");
+    menu.Append(ID_MarkUnread, "Mark as &Unread\tu");
+    if (any_enclosure)
+        menu.Append(ID_Download, "&Download Enclosure\td");
+    menu.AppendSeparator();
+    menu.Append(ID_FilterFeed, "&Filter to This Feed");
+
+    int choice = list_->GetPopupMenuSelectionFromUser(menu);
+    switch (choice) {
+    case ID_Browser:    action_open_in_browser(); break;
+    case ID_CopyLink:   action_copy_link();       break;
+    case ID_MarkRead:   action_mark_read();       break;
+    case ID_MarkUnread: action_mark_unread();     break;
+    case ID_Download:   action_download();        break;
+    case ID_FilterFeed: {
+        // Use the primary (focused) entry's feed, even if multiple
+        // rows are selected — the menu was launched from one of
+        // those rows, so its source feed is the natural pick.
+        long p = list_->primary();
+        if (p >= 0 && (size_t)p < app_->entries.size()) {
+            set_filter_to_feed(app_->entries[(size_t)p].feed_url);
+        }
+        break;
+    }
+    }
 }
 
 void MainFrame::on_list_key(wxKeyEvent &e)

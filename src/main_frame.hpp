@@ -74,6 +74,7 @@ private:
     void on_close(wxCloseEvent &);
     void on_list_selected(wxDataViewEvent &);
     void on_list_activated(wxDataViewEvent &);
+    void on_list_context_menu(wxDataViewEvent &);
     void on_list_key(wxKeyEvent &);
     void on_filter_key(wxKeyEvent &);
     void on_pane_close(wxAuiManagerEvent &);

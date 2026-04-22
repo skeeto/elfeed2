@@ -22,6 +22,39 @@ static wxStandardPaths &std_paths()
     return sp;
 }
 
+void reveal_in_file_manager(const std::string &path)
+{
+    if (path.empty()) return;
+    wxString p = wxString::FromUTF8(path);
+
+    // Shell-quote with double quotes; escape embedded `"` so a
+    // pathological filename can't break out of the quoted argument.
+    auto quote = [](const wxString &s) {
+        wxString out = "\"";
+        for (size_t i = 0; i < s.size(); i++) {
+            if (s[i] == '"' || s[i] == '\\') out += '\\';
+            out += s[i];
+        }
+        out += "\"";
+        return out;
+    };
+
+#if defined(__WXMAC__)
+    // `open -R` reveals (selects) the file in its Finder window.
+    wxExecute("/usr/bin/open -R " + quote(p), wxEXEC_ASYNC);
+#elif defined(__WXMSW__)
+    // `explorer.exe /select,<path>` — comma separator, no space.
+    wxExecute("explorer.exe /select," + quote(p), wxEXEC_ASYNC);
+#else
+    // Linux: no portable reveal verb; just open the parent dir
+    // through the system's default handler (xdg-open / kde-open).
+    wxFileName fn(p);
+    wxString dir = fn.GetPath();
+    if (dir.empty()) dir = p;
+    wxLaunchDefaultApplication(dir);
+#endif
+}
+
 std::string elfeed_user_agent()
 {
     // "Elfeed2/<ver> (+https://github.com/skeeto/elfeed2; feed reader)"

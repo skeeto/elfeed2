@@ -22,6 +22,13 @@ std::string elfeed_user_agent();
 
 // ---- Filesystem ----
 
+// Open the file manager (Finder/Explorer/etc.) at `path`. On macOS
+// (`open -R`) and Windows (`explorer /select,`) the file is
+// highlighted in its containing folder; on other platforms there's
+// no standard "reveal" verb so the parent directory is simply
+// opened. Returns immediately (async).
+void reveal_in_file_manager(const std::string &path);
+
 // Create `path` and any missing parent directories. UTF-8 input; safe
 // on Windows (routes through wxFileName::Mkdir so non-ASCII paths work).
 // Returns true on success or if the directory already exists.

@@ -30,6 +30,7 @@ private:
     void on_filter_changed(wxCommandEvent &);
     void on_clear(wxCommandEvent &);
     void on_sort(wxDataViewEvent &);
+    void on_context_menu(wxDataViewEvent &);
 
     // Sort snapshot_ in place per the current column header state.
     // Default (no sort key) is insertion order, i.e. chronological.

@@ -2,6 +2,8 @@
 #include "util.hpp"
 
 #include <wx/button.h>
+#include <wx/clipbrd.h>
+#include <wx/menu.h>
 #include <wx/sizer.h>
 #include <wx/variant.h>
 
@@ -92,6 +94,8 @@ DownloadsPanel::DownloadsPanel(wxWindow *parent, Elfeed *app)
                 });
     list_->Bind(wxEVT_DATAVIEW_COLUMN_SORTED,
                 &DownloadsPanel::on_sort, this);
+    list_->Bind(wxEVT_DATAVIEW_ITEM_CONTEXT_MENU,
+                &DownloadsPanel::on_context_menu, this);
     vsz->Add(list_, 1, wxEXPAND);
 
     SetSizer(vsz);
@@ -228,6 +232,95 @@ void DownloadsPanel::on_sort(wxDataViewEvent &)
     model_->Reset((unsigned int)snapshot_.size());
     db_save_ui_state(app_, "sort.downloads",
                      dataview_serialize_sort(list_).c_str());
+}
+
+// Look up a DownloadItem by its id. The snapshot rows store id; the
+// authoritative item lives in app->downloads with full URL / paths.
+static const DownloadItem *find_item(const Elfeed *app, int id)
+{
+    for (auto &d : app->downloads)
+        if (d.id == id) return &d;
+    return nullptr;
+}
+
+void DownloadsPanel::on_context_menu(wxDataViewEvent &event)
+{
+    wxDataViewItem item = event.GetItem();
+    if (!item.IsOk()) return;
+
+    if (!list_->IsSelected(item)) {
+        list_->UnselectAll();
+        list_->Select(item);
+    }
+
+    // Look up the underlying DownloadItem for the right-clicked row
+    // — we need URL, output_path, and directory which the row
+    // snapshot doesn't carry.
+    unsigned idx = model_->GetRow(item);
+    if (idx >= snapshot_.size()) return;
+    const Row &r = snapshot_[idx];
+    const DownloadItem *d = find_item(app_, r.id);
+    if (!d) return;
+
+    enum {
+        ID_PauseToggle = wxID_HIGHEST + 1,
+        ID_Remove,
+        ID_CopyURL,
+        ID_CopyDest,
+        ID_Reveal,
+    };
+
+    // Choose the destination path we'll act on. HTTP downloads know
+    // the exact file (set at enqueue time); subprocess downloads
+    // (yt-dlp) only know the directory until completion. Fall back
+    // sensibly so the menu items work for both cases.
+    std::string dest_path = d->output_path;
+    if (dest_path.empty()) dest_path = d->directory;
+
+    wxMenu menu;
+    menu.Append(ID_PauseToggle, r.paused ? "&Resume" : "&Pause");
+    menu.Append(ID_Remove,      "Re&move");
+    menu.AppendSeparator();
+    menu.Append(ID_CopyURL,     "Copy &URL");
+    if (!dest_path.empty()) {
+        menu.Append(ID_CopyDest, "Copy &Destination Path");
+#if defined(__WXMAC__)
+        menu.Append(ID_Reveal,   "Show in &Finder");
+#elif defined(__WXMSW__)
+        menu.Append(ID_Reveal,   "Show in &Explorer");
+#else
+        menu.Append(ID_Reveal,   "Open Containing &Folder");
+#endif
+    }
+
+    int choice = list_->GetPopupMenuSelectionFromUser(menu);
+    switch (choice) {
+    case ID_PauseToggle:
+        download_pause(app_, r.id);
+        refresh();
+        break;
+    case ID_Remove:
+        download_remove(app_, r.id);
+        refresh();
+        break;
+    case ID_CopyURL:
+        if (wxTheClipboard->Open()) {
+            wxTheClipboard->SetData(
+                new wxTextDataObject(wxString::FromUTF8(d->url)));
+            wxTheClipboard->Close();
+        }
+        break;
+    case ID_CopyDest:
+        if (wxTheClipboard->Open()) {
+            wxTheClipboard->SetData(
+                new wxTextDataObject(wxString::FromUTF8(dest_path)));
+            wxTheClipboard->Close();
+        }
+        break;
+    case ID_Reveal:
+        reveal_in_file_manager(dest_path);
+        break;
+    }
 }
 
 void DownloadsPanel::on_pause(wxCommandEvent &)
