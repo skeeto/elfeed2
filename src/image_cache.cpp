@@ -128,48 +128,47 @@ void cache_put(Elfeed *app, const std::string &url,
     sqlite3_step(stmt);
     sqlite3_finalize(stmt);
 
-    // LRU-evict until we're under the cap. Cheap because the
-    // `idx_image_cache_lru` index makes ORDER BY last_used O(log n)
-    // and we stop as soon as the running total dips below the cap.
-    int64_t total = 0;
-    {
-        sqlite3_stmt *tstmt;
-        if (sqlite3_prepare_v2(app->db,
-                               "SELECT COALESCE(SUM(size),0) FROM image_cache",
-                               -1, &tstmt, nullptr) == SQLITE_OK) {
-            if (sqlite3_step(tstmt) == SQLITE_ROW)
-                total = sqlite3_column_int64(tstmt, 0);
-            sqlite3_finalize(tstmt);
-        }
-    }
-    if (total <= kCacheCapBytes) return;
+    // LRU-evict until we're under the cap. Prepare the two hot
+    // statements once outside the loop and rebind each round —
+    // preparing-inside-the-loop was compiling the same SQL from
+    // scratch on every eviction pass, which is exactly the work
+    // SQLite prepared statements exist to skip. Cheap because
+    // idx_image_cache_lru makes ORDER BY last_used O(log n) and
+    // we stop as soon as the running total dips below the cap.
+    sqlite3_stmt *sum_stmt = nullptr;
+    sqlite3_prepare_v2(app->db,
+        "SELECT COALESCE(SUM(size),0) FROM image_cache",
+        -1, &sum_stmt, nullptr);
 
-    const char *evict =
-        "DELETE FROM image_cache WHERE url IN"
-        " (SELECT url FROM image_cache ORDER BY last_used ASC LIMIT ?)";
-    while (total > kCacheCapBytes) {
-        // Delete the 16 oldest rows per round; cheap if we're only a
-        // little over cap, but quickly converges after a big import.
-        sqlite3_stmt *estmt;
-        if (sqlite3_prepare_v2(app->db, evict, -1, &estmt, nullptr)
-            != SQLITE_OK) break;
-        sqlite3_bind_int(estmt, 1, 16);
-        int rc = sqlite3_step(estmt);
-        sqlite3_finalize(estmt);
-        if (rc != SQLITE_DONE) break;
-
-        // Recompute the total. Much cheaper than tracking deltas —
-        // the LRU index keeps SUM() fast even with thousands of rows.
-        total = 0;
-        sqlite3_stmt *tstmt;
-        if (sqlite3_prepare_v2(app->db,
-                               "SELECT COALESCE(SUM(size),0) FROM image_cache",
-                               -1, &tstmt, nullptr) == SQLITE_OK) {
-            if (sqlite3_step(tstmt) == SQLITE_ROW)
-                total = sqlite3_column_int64(tstmt, 0);
-            sqlite3_finalize(tstmt);
+    auto read_total = [&]() -> int64_t {
+        int64_t t = 0;
+        if (sum_stmt) {
+            sqlite3_reset(sum_stmt);
+            if (sqlite3_step(sum_stmt) == SQLITE_ROW)
+                t = sqlite3_column_int64(sum_stmt, 0);
         }
+        return t;
+    };
+
+    int64_t total = read_total();
+    if (total > kCacheCapBytes) {
+        sqlite3_stmt *evict_stmt = nullptr;
+        sqlite3_prepare_v2(app->db,
+            "DELETE FROM image_cache WHERE url IN"
+            " (SELECT url FROM image_cache ORDER BY last_used ASC LIMIT ?)",
+            -1, &evict_stmt, nullptr);
+        while (total > kCacheCapBytes && evict_stmt) {
+            // Delete the 16 oldest rows per round; cheap if we're
+            // only a little over cap, but quickly converges after
+            // a big import.
+            sqlite3_reset(evict_stmt);
+            sqlite3_bind_int(evict_stmt, 1, 16);
+            if (sqlite3_step(evict_stmt) != SQLITE_DONE) break;
+            total = read_total();
+        }
+        if (evict_stmt) sqlite3_finalize(evict_stmt);
     }
+    if (sum_stmt) sqlite3_finalize(sum_stmt);
 }
 
 // ---- Background fetcher -----------------------------------------
