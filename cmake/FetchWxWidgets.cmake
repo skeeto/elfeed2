@@ -47,21 +47,18 @@ set(wxBUILD_SAMPLES OFF CACHE BOOL "" FORCE)
 set(wxBUILD_DEMOS   OFF CACHE BOOL "" FORCE)
 set(wxBUILD_INSTALL OFF CACHE BOOL "" FORCE)
 
-# Store wxString contents as UTF-8 internally. Default wx builds
-# put a wchar_t-wide representation in wxString and route narrow
-# char* inputs (including every const-string literal in our UI
-# code) through wxConvLibc — which is locale-dependent and
-# truncates UTF-8 bytes silently on non-UTF-8 locales (POSIX, C,
-# containers with minimal locale). With UTF-8 internal, the
-# "convert" step is a no-op: bytes in, bytes out, everywhere the
-# code already treats strings as UTF-8. Slightly more work at
-# the OS API boundary on Windows (UTF-8 → UTF-16) but that's
-# amortized behind event loops in a GUI feed reader, not a tight
-# inner loop. LOCAL builds pick up whatever the distro's wx is
-# built with — usually the default wchar_t — so we still take
-# care to route narrow char* through wxString::FromUTF8 or wxT
-# there for portability.
-set(wxUSE_UNICODE_UTF8 ON CACHE BOOL "" FORCE)
+# wxUSE_UNICODE_UTF8 was briefly enabled to dodge wxConvLibc on
+# narrow char* → wxString conversions, but it turns out wx's own
+# filesys.cpp (and several other spots) iterates wxString with
+# random GetChar(i) indexing, which is O(n) per call on UTF-8
+# internal storage and O(n²) in a scan loop. The inline-image
+# data: URIs we generate are tens of KB long, so every
+# wxHtmlWindow::SetPage parse turned into a multi-billion-op
+# stall. Back to the default (wchar_t internal, O(1) indexing).
+# We still rely on wxString::FromUTF8 for std::string inputs and
+# wxT(...) for literals with non-ASCII glyphs; those are the
+# load-bearing guards that keep the code locale-independent
+# regardless of wx's internal encoding choice.
 
 # Disable wxWidgets subsystems we don't use. Each one drops source
 # files from wx's own build (faster initial compile) AND removes
