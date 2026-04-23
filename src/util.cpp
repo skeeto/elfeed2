@@ -15,14 +15,18 @@
 #include <unordered_map>
 #include <unordered_set>
 
-// Ensure wxStandardPaths uses XDG layout on Linux/BSD; on macOS and
-// Windows this is a no-op.
+// Thin wrapper around wxStandardPaths::Get() for macOS / Windows
+// callers. Not used on Linux/BSD — see user_data_dir() and
+// user_config_dir() for why (wxStandardPaths on wxGTK 3.2 ignores
+// FileLayout_XDG for GetUserDataDir, so we build the path by hand).
+#if !(defined(__WXGTK__) || defined(__linux__) || defined(__FreeBSD__))
 static wxStandardPaths &std_paths()
 {
     auto &sp = wxStandardPaths::Get();
     sp.SetFileLayout(wxStandardPaths::FileLayout_XDG);
     return sp;
 }
+#endif
 
 void reveal_in_file_manager(const std::string &path)
 {
