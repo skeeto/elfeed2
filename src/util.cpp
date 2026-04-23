@@ -492,7 +492,11 @@ void dataview_show_column_menu(wxDataViewCtrl *ctrl,
         item->Check(!col->IsHidden());
     }
     menu.Bind(wxEVT_MENU,
-              [ctrl, base_id, on_change](wxCommandEvent &e) {
+              // base_id is a const int with a constant-expression
+              // initializer, so it's odr-usable inside the lambda
+              // without being captured — including it in the
+              // capture list trips -Wunused-lambda-capture.
+              [ctrl, on_change](wxCommandEvent &e) {
                   unsigned idx = (unsigned)(e.GetId() - base_id);
                   if (idx < ctrl->GetColumnCount()) {
                       auto *col = ctrl->GetColumn(idx);
