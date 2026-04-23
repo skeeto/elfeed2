@@ -77,11 +77,30 @@ static std::string remove_dot_segments(const std::string &input)
 }
 
 // Resolve a potentially relative URL against a base URL
+// `scheme:`-prefixed? An absolute URI reference per RFC 3986 —
+// starts with an alpha, then alpha/digit/+/-/., then ':'. Catches
+// http:, https:, data:, mailto:, javascript:, file:, etc. without
+// needing each listed explicitly.
+static bool has_uri_scheme(const std::string &s)
+{
+    if (s.empty() || !std::isalpha((unsigned char)s[0])) return false;
+    for (size_t i = 1; i < s.size(); i++) {
+        char c = s[i];
+        if (c == ':') return i > 0;
+        if (!(std::isalnum((unsigned char)c) ||
+              c == '+' || c == '-' || c == '.'))
+            return false;
+    }
+    return false;
+}
+
 static std::string resolve_url(const std::string &base, const std::string &ref)
 {
     if (ref.empty()) return base;
-    // Absolute URL?
-    if (ref.find("://") != std::string::npos) return ref;
+    // Already absolute? Covers http(s)://host/path and also
+    // schemeless-but-absolute forms like data:..., mailto:...,
+    // javascript:..., which don't have the '//'.
+    if (has_uri_scheme(ref)) return ref;
     // Protocol-relative?
     if (ref.size() >= 2 && ref[0] == '/' && ref[1] == '/') {
         return url_protocol(base) + ":" + ref;
@@ -115,6 +134,90 @@ static std::string resolve_url(const std::string &base, const std::string &ref)
     }
 
     return scheme + "://" + authority + merged;
+}
+
+static bool ci_match_at(const std::string &s, size_t pos,
+                        const char *lit, size_t n)
+{
+    if (pos + n > s.size()) return false;
+    for (size_t i = 0; i < n; i++)
+        if (std::tolower((unsigned char)s[pos + i]) !=
+            std::tolower((unsigned char)lit[i])) return false;
+    return true;
+}
+
+// Rewrite one occurrence of `attr` (e.g. "src" or "href") inside
+// `tag` by resolving its value against `base`. Modifies `tag`
+// in place. Handles double-quoted, single-quoted, and unquoted
+// attribute values. No-op if the attribute isn't present or the
+// value is already absolute (resolve_url returns ref unchanged
+// in that case, so tag.replace sees no diff).
+static void rewrite_tag_attr(std::string &tag, const char *attr,
+                             const std::string &base)
+{
+    size_t n = std::strlen(attr);
+    for (size_t i = 1; i + n < tag.size(); i++) {
+        if (!ci_match_at(tag, i, attr, n)) continue;
+        char prev = tag[i - 1];
+        if (!(std::isspace((unsigned char)prev) || prev == '<'))
+            continue;
+        size_t p = i + n;
+        while (p < tag.size() && std::isspace((unsigned char)tag[p])) p++;
+        if (p >= tag.size() || tag[p] != '=') continue;
+        p++;
+        while (p < tag.size() && std::isspace((unsigned char)tag[p])) p++;
+        if (p >= tag.size()) continue;
+        char q = tag[p];
+        size_t vs, ve;
+        if (q == '"' || q == '\'') {
+            vs = p + 1;
+            ve = tag.find(q, vs);
+            if (ve == std::string::npos) return;
+        } else {
+            vs = p;
+            ve = vs;
+            while (ve < tag.size() &&
+                   !std::isspace((unsigned char)tag[ve]) &&
+                   tag[ve] != '>')
+                ve++;
+        }
+        std::string val = tag.substr(vs, ve - vs);
+        std::string resolved = resolve_url(base, val);
+        if (resolved != val)
+            tag.replace(vs, ve - vs, resolved);
+        return;
+    }
+}
+
+// Rewrite every <tag attr="..."> inside the HTML body so that
+// relative URLs on `src` and `href` attributes become absolute,
+// resolved against `base`. Feeds commonly include HTML content
+// whose author wrote `<img src="/images/foo.png">` assuming the
+// reader would know the feed's origin — classic Elfeed does this
+// too. Left alone: URLs that already have a scheme (http, https,
+// data, mailto, javascript, …) so absolute refs pass through
+// untouched.
+static std::string rewrite_relative_urls_in_html(
+    const std::string &html, const std::string &base)
+{
+    if (base.empty() || html.empty()) return html;
+    std::string out;
+    out.reserve(html.size());
+    size_t i = 0;
+    while (i < html.size()) {
+        if (html[i] != '<') { out += html[i++]; continue; }
+        size_t tag_end = html.find('>', i);
+        if (tag_end == std::string::npos) {
+            out.append(html, i, std::string::npos);
+            break;
+        }
+        std::string tag = html.substr(i, tag_end - i + 1);
+        rewrite_tag_attr(tag, "src",  base);
+        rewrite_tag_attr(tag, "href", base);
+        out += tag;
+        i = tag_end + 1;
+    }
+    return out;
 }
 
 // Prepend protocol to protocol-relative URL
@@ -430,7 +533,8 @@ static void parse_atom(const std::string &url, pugi::xml_node root,
 
         e.authors = atom_authors(entry_node);
 
-        e.content = atom_content(entry_node);
+        e.content = rewrite_relative_urls_in_html(
+            atom_content(entry_node), entry_base);
 
         // Content type: check content/@type or summary/@type
         auto content_node = find_child(entry_node, "content");
@@ -539,10 +643,14 @@ static void parse_rss2(const std::string &url, pugi::xml_node root,
             }
         }
 
-        // Content: prefer content:encoded over description
+        // Content: prefer content:encoded over description. RSS
+        // has no xml:base convention — resolve relative URLs in
+        // the content against the feed URL itself, which matches
+        // what a browser would do if the user loaded the feed
+        // directly.
         std::string content = child_text_all(item, "encoded");
         if (content.empty()) content = child_text_all(item, "description");
-        e.content = content;
+        e.content = rewrite_relative_urls_in_html(content, url);
 
         // ID
         std::string id_str = guid;
@@ -597,7 +705,8 @@ static void parse_rss1(const std::string &url, pugi::xml_node root,
         e.date = parse_date(date_str);
         if (e.date <= 0) e.date = (double)time(nullptr);
 
-        e.content = child_text_all(item, "description");
+        e.content = rewrite_relative_urls_in_html(
+            child_text_all(item, "description"), url);
 
         std::string id_str = e.link;
         if (id_str.empty()) id_str = generate_id(e.content);
