@@ -288,7 +288,11 @@ void LogPanel::on_context_menu(wxDataViewEvent &event)
     enum { ID_Copy = wxID_HIGHEST + 1, ID_Export, ID_Clear };
     wxMenu menu;
     menu.Append(ID_Copy,   "&Copy");
-    menu.Append(ID_Export, "&Export to File…");
+    // wxT so the ellipsis goes through the compiler as a wide-char
+    // literal rather than through wxConvLibc at runtime — which
+    // truncates at the first non-ASCII byte on a POSIX/C locale
+    // and produces a blank menu item.
+    menu.Append(ID_Export, wxT("&Export to File…"));
     menu.AppendSeparator();
     menu.Append(ID_Clear,  "Clear &Log");
 
@@ -331,7 +335,11 @@ void LogPanel::on_context_menu(wxDataViewEvent &event)
             out += "\n";
         }
         wxFile f(dlg.GetPath(), wxFile::write);
-        if (f.IsOpened()) f.Write(wxString::FromUTF8(out));
+        // Raw bytes on the wire — `out` is already UTF-8; routing
+        // it through wxString (FromUTF8 → Write(wxString, wxConvUTF8))
+        // adds a round-trip whose failure mode on a non-UTF-8
+        // locale is a blank file.
+        if (f.IsOpened()) f.Write(out.data(), out.size());
         return;
     }
     if (choice == ID_Copy) {
