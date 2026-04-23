@@ -1222,11 +1222,21 @@ void MainFrame::on_filter_key(wxKeyEvent &e)
 
 void MainFrame::move_selection(int delta)
 {
-    long p = list_->primary();
     long n = (long)app_->entries.size();
-    if (p < 0) return;
-    long target = p + delta;
-    if (target < 0 || target >= n) return;
+    if (n == 0) return;
+    long p = list_->primary();
+    long target;
+    if (p < 0) {
+        // No row is focused yet (just finished a requery, or the
+        // list never had focus). j/k should "wake up" the list by
+        // landing on the top row — that's the convention every
+        // other list widget follows, and it keeps the keys useful
+        // after a filter change that cleared the selection.
+        target = 0;
+    } else {
+        target = p + delta;
+        if (target < 0 || target >= n) return;
+    }
     if (visual_anchor_ >= 0) {
         long lo = std::min(visual_anchor_, target);
         long hi = std::max(visual_anchor_, target);
