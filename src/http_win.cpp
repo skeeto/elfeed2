@@ -145,9 +145,18 @@ HttpResponse http_fetch(const HttpRequest &req)
         add_header("If-None-Match: " + req.etag);
     if (!req.last_modified.empty())
         add_header("If-Modified-Since: " + req.last_modified);
-    // WinHTTP can decompress via WINHTTP_OPTION_DECOMPRESSION, but we
-    // don't enable it; keep the response identity-encoded so pugixml
-    // can parse it directly.
+    // Enable WinHTTP's built-in decompression. Many feed servers
+    // send gzipped content regardless of Accept-Encoding, and the
+    // previous identity-only path fell over on those (pugixml
+    // getting raw gzip bytes errored as "No document element
+    // found"). WINHTTP_OPTION_DECOMPRESSION (Windows 8.1+) tells
+    // WinHTTP to add Accept-Encoding: gzip, deflate for us and
+    // decompress the response transparently before we read it.
+    DWORD decomp =
+        WINHTTP_DECOMPRESSION_FLAG_GZIP |
+        WINHTTP_DECOMPRESSION_FLAG_DEFLATE;
+    WinHttpSetOption(hreq, WINHTTP_OPTION_DECOMPRESSION,
+                     &decomp, sizeof(decomp));
 
     BOOL ok = WinHttpSendRequest(hreq, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
                                  WINHTTP_NO_REQUEST_DATA, 0, 0, 0);

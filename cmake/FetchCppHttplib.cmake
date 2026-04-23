@@ -33,28 +33,44 @@ if(DEPS STREQUAL "LOCAL")
         CPPHTTPLIB_HEADER_ONLY)
     endif()
   endif()
-  return()
+else()
+  include(FetchContent)
+  fetch_content_bundled(cpp-httplib cpp-httplib)
+
+  # SOURCE_SUBDIR pointing at a nonexistent directory tells
+  # FetchContent_MakeAvailable to populate the source but skip
+  # add_subdirectory — we don't want cpp-httplib's CMakeLists to
+  # run (it'd find_package(OpenSSL) on its own and build a
+  # split-mode .so/.a we don't use). Modern alternative to the
+  # deprecated FetchContent_Populate call.
+  FetchContent_Declare(
+    cpp-httplib
+    URL           https://github.com/yhirose/cpp-httplib/archive/refs/tags/v0.43.0.tar.gz
+    URL_HASH      SHA256=28b88a7f0751c762cc9c70c91db0d6953554c40f49285907e716dd7943a824a5
+    SOURCE_SUBDIR _no_cmake_
+  )
+  FetchContent_MakeAvailable(cpp-httplib)
+
+  if(NOT TARGET cpp-httplib)
+    add_library(cpp-httplib INTERFACE)
+    target_include_directories(cpp-httplib INTERFACE
+      "${cpp-httplib_SOURCE_DIR}")
+  endif()
 endif()
 
-include(FetchContent)
-fetch_content_bundled(cpp-httplib cpp-httplib)
-
-# SOURCE_SUBDIR pointing at a nonexistent directory tells
-# FetchContent_MakeAvailable to populate the source but skip
-# add_subdirectory — we don't want cpp-httplib's CMakeLists to run
-# (it'd find_package(OpenSSL) on its own and build a split-mode
-# .so/.a we don't use). Modern alternative to the deprecated
-# FetchContent_Populate call.
-FetchContent_Declare(
-  cpp-httplib
-  URL           https://github.com/yhirose/cpp-httplib/archive/refs/tags/v0.43.0.tar.gz
-  URL_HASH      SHA256=28b88a7f0751c762cc9c70c91db0d6953554c40f49285907e716dd7943a824a5
-  SOURCE_SUBDIR _no_cmake_
-)
-FetchContent_MakeAvailable(cpp-httplib)
-
-if(NOT TARGET cpp-httplib)
-  add_library(cpp-httplib INTERFACE)
-  target_include_directories(cpp-httplib INTERFACE
-    "${cpp-httplib_SOURCE_DIR}")
-endif()
+# Hook zlib into cpp-httplib on both LOCAL and FETCH. Many
+# real-world feed servers send gzipped content regardless of
+# whether Accept-Encoding asked for it (Cloudflare, some nginx
+# configs). Without decompression we get gzip bytes back and
+# pugixml fails with "No document element found." With
+# CPPHTTPLIB_ZLIB_SUPPORT the header-only code auto-adds
+# Accept-Encoding: gzip, deflate and auto-decompresses the
+# response before handing us the body. ZLIB is part of the
+# base system on every platform we target (macOS, every Linux
+# distro, mingw-w64's runtime), so using the system package
+# keeps the build portable without pulling more third-party
+# source.
+find_package(ZLIB REQUIRED)
+target_link_libraries(cpp-httplib INTERFACE ZLIB::ZLIB)
+target_compile_definitions(cpp-httplib INTERFACE
+  CPPHTTPLIB_ZLIB_SUPPORT)

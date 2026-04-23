@@ -133,13 +133,17 @@ HttpResponse http_fetch(const HttpRequest &req)
         cli.set_read_timeout(req.timeout_seconds, 0);
         cli.set_write_timeout(req.timeout_seconds, 0);
         cli.set_follow_location(false);  // we handle redirects
-        // Don't ask for compression: cpp-httplib only decompresses
-        // when built with CPPHTTPLIB_ZLIB_SUPPORT, which we don't
-        // link. Without this, Accept-Encoding: gzip would cause
-        // pugixml to choke on gzipped bytes. Identity encoding keeps
-        // the pipeline simple.
+        // CPPHTTPLIB_ZLIB_SUPPORT is compiled in (see
+        // cmake/FetchCppHttplib.cmake). With that define, cpp-httplib
+        // automatically adds Accept-Encoding: gzip, deflate and
+        // auto-decompresses the response before returning it — which
+        // is what we want, because some feed servers (Cloudflare,
+        // various nginx configs) send gzipped content regardless of
+        // whether we asked for it. The decompressed body is what
+        // pugixml parses. set_compress(false) still disables sending
+        // compressed *request* bodies; that's not a direction we use.
         cli.set_compress(false);
-        cli.set_decompress(false);
+        cli.set_decompress(true);
         cli.set_keep_alive(false);
 
         // TLS: verify server cert against the system CA bundle.
