@@ -237,13 +237,19 @@ void prefetch(Elfeed *app, std::vector<std::string> urls)
 
 // ---- HTML scanner -------------------------------------------------
 
-// Case-insensitive byte compare.
-bool iequals(const std::string &a, const char *b, size_t n)
+// Case-insensitive byte compare at a position. Takes the full
+// haystack + offset rather than a substring so the caller doesn't
+// allocate a temporary std::string for every comparison — the
+// previous `iequals(s.substr(i, 3), "img", 3)` style allocated
+// once per `<` in the HTML body while scanning for image tags,
+// which added up for content-heavy feeds.
+static bool iequals_at(const std::string &s, size_t pos,
+                       const char *lit, size_t n)
 {
-    if (a.size() < n) return false;
+    if (pos + n > s.size()) return false;
     for (size_t i = 0; i < n; i++)
-        if (std::tolower((unsigned char)a[i]) !=
-            std::tolower((unsigned char)b[i])) return false;
+        if (std::tolower((unsigned char)s[pos + i]) !=
+            std::tolower((unsigned char)lit[i])) return false;
     return true;
 }
 
@@ -254,7 +260,7 @@ size_t find_img(const std::string &s, size_t from)
 {
     for (size_t i = from; i + 4 <= s.size(); i++) {
         if (s[i] != '<') continue;
-        if (iequals(s.substr(i + 1, 3), "img", 3)) {
+        if (iequals_at(s, i + 1, "img", 3)) {
             // Must be followed by whitespace or '>' to count as a tag.
             if (i + 4 >= s.size()) return i;
             char c = s[i + 4];
@@ -271,7 +277,7 @@ std::string extract_src(const std::string &tag)
 {
     // Look for `src` as an attribute name. Scan char by char.
     for (size_t i = 0; i + 3 < tag.size(); i++) {
-        if (!(iequals(tag.substr(i, 3), "src", 3))) continue;
+        if (!iequals_at(tag, i, "src", 3)) continue;
         // Must be preceded by whitespace / tag start and followed by
         // '=' or whitespace.
         if (i > 0) {
@@ -343,7 +349,7 @@ std::string replace_src(const std::string &tag, const std::string &new_src)
 {
     // Same scan as extract_src; when we find the value, we splice.
     for (size_t i = 0; i + 3 < tag.size(); i++) {
-        if (!(iequals(tag.substr(i, 3), "src", 3))) continue;
+        if (!iequals_at(tag, i, "src", 3)) continue;
         if (i > 0) {
             char p = tag[i - 1];
             if (!(std::isspace((unsigned char)p) || p == '<' || p == ' '))
