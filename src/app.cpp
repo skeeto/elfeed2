@@ -23,6 +23,7 @@ extern const char embedded_welcome_html[];
 
 #include <cstdarg>
 #include <cstdio>
+#include <cstring>
 #include <ctime>
 
 wxDEFINE_EVENT(wxEVT_ELFEED_WAKE, wxThreadEvent);
@@ -77,8 +78,18 @@ void elfeed_init(Elfeed *app)
                 wxString::FromUTF8(app->config_path))) {
             wxFile f(wxString::FromUTF8(app->config_path),
                      wxFile::write);
-            if (f.IsOpened())
-                f.Write(embedded_sample_config);
+            if (f.IsOpened()) {
+                // Write the raw bytes (size + pointer) rather than
+                // letting wxFile::Write(const wxString&) do an
+                // implicit char* → wxString → UTF-8 round-trip.
+                // That path uses wxConvLibc to decode the input and
+                // truncates at the first byte it can't make sense
+                // of — on a Linux host with a non-UTF-8 locale the
+                // seeded config came out blank because the very
+                // first em-dash in the file aborted the conversion.
+                f.Write(embedded_sample_config,
+                        std::strlen(embedded_sample_config));
+            }
         }
     }
 
