@@ -143,6 +143,16 @@ struct Elfeed {
     // purged on startup. Default 90; configurable via the
     // `log-retention-days` directive.
     int log_retention_days = 90;
+    // Whether to fetch and inline images referenced from entry
+    // content into the preview pane. Toggled by the `inline-images`
+    // config directive. Disable on machines where wxImage decoding
+    // is too slow to keep the UI responsive (old XP hardware, etc).
+    // With this off the <img> tags in entry content stay untouched;
+    // wxHtmlWindow can't load http(s) URLs directly so it displays
+    // the broken-image placeholder. Content HTML in the DB is not
+    // modified, so flipping this back on immediately restores
+    // inline images on previously-viewed entries.
+    bool inline_images = true;
     // Single-letter filter presets (from the `preset` config directive).
     // Key is the ASCII letter the user pressed; value is the filter
     // string to apply. Populated by config_load.

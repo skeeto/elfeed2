@@ -44,6 +44,14 @@ max-download-failures 5
 # are purged on each launch.
 log-retention-days   90
 
+# Inline images referenced from entry content into the preview
+# pane. Disable (`inline-images no`) on slow hardware where wx's
+# image decoding stalls the UI — entries still render, images
+# just show as broken-image placeholders. Stored content is
+# untouched either way, so flipping back to `yes` restores
+# inline images on existing entries.
+inline-images        yes
+
 # ---- Filter presets (single-key shortcuts) -------------------------
 # `preset KEY FILTER` binds KEY to apply that filter when the entry
 # list has focus. The built-in keys (j/k/g/G/u/r/b/y/d/f/s//) take

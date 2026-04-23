@@ -215,6 +215,7 @@ void config_reload(Elfeed *app)
     app->fetch_timeout = 30;
     app->max_download_failures = 5;
     app->log_retention_days = 90;
+    app->inline_images = true;
 
     config_load(app);
 

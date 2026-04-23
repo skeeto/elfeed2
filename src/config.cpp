@@ -260,6 +260,21 @@ void config_load(Elfeed *app)
             app->log_retention_days = n;
             continue;
         }
+        if (dir0 == "inline-images") {
+            // Liberal parse of the yes/no family so the directive
+            // is forgiving about wording — yes/no, true/false,
+            // on/off, 1/0 all accepted; unknown values warn and
+            // leave the current setting alone.
+            std::string v = value_after_directive(line);
+            for (auto &c : v) c = (char)std::tolower((unsigned char)c);
+            if (v == "yes" || v == "true"  || v == "on"  || v == "1")
+                app->inline_images = true;
+            else if (v == "no" || v == "false" || v == "off" || v == "0")
+                app->inline_images = false;
+            else
+                warn("inline-images: expected yes/no", ln);
+            continue;
+        }
 
         // --- stanza body (applies to current feed) -----------------
         if (dir0 == "title") {

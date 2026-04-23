@@ -239,8 +239,13 @@ void EntryDetail::render()
     // Swap external http(s) image URLs for cached data: URIs in the
     // same pass that queues fetches for the ones we don't have yet.
     // Cheap for a document with no images; only the fetched-and-not-
-    // yet-cached images trigger background work.
-    body = image_cache_inline(app_, body);
+    // yet-cached images trigger background work. Skippable via the
+    // `inline-images no` config directive — for slow hardware where
+    // wx's image decoding stalls the UI, running with this off
+    // leaves the http(s) src untouched so wxHtmlWindow shows its
+    // broken-image placeholder without fetching.
+    if (app_->inline_images)
+        body = image_cache_inline(app_, body);
 
     // Wrap in a body tag whose colors track the system theme so the
     // preview pane reads correctly in dark mode. wxHtmlWindow has
