@@ -452,10 +452,17 @@ void MainFrame::requery(int default_limit)
         list_->ensure_visible_row(new_primary);
     }
 
-    if (new_primary >= 0 && (size_t)new_primary < app_->entries.size())
-        detail_->show_entry(&app_->entries[(size_t)new_primary]);
-    else
-        detail_->show_entry(nullptr);
+    // Rendering the preview is only useful when the pane is
+    // visible — otherwise db_entry_load_details + HTML build +
+    // image-cache inline all run for nothing. When the pane is
+    // re-opened, toggle_pane calls show_entry(current primary)
+    // so the pane catches up with whatever's selected.
+    if (pane_shown("entry_detail")) {
+        if (new_primary >= 0 && (size_t)new_primary < app_->entries.size())
+            detail_->show_entry(&app_->entries[(size_t)new_primary]);
+        else
+            detail_->show_entry(nullptr);
+    }
 }
 
 void MainFrame::flash_status(const wxString &msg)
@@ -536,6 +543,17 @@ void MainFrame::toggle_pane(const char *name)
             feeds_->refresh();
         else if (std::string(name) == "activity" && activity_)
             activity_->refresh();
+        else if (std::string(name) == "entry_detail" && detail_) {
+            // Preview-pane render sites elsewhere are gated on
+            // pane_shown so they're no-ops while hidden; the pane
+            // reopening is the trigger to catch up with whatever's
+            // currently selected.
+            long p = list_ ? list_->primary() : -1;
+            if (p >= 0 && (size_t)p < app_->entries.size())
+                detail_->show_entry(&app_->entries[(size_t)p]);
+            else
+                detail_->show_entry(nullptr);
+        }
     }
 }
 
@@ -580,8 +598,12 @@ void MainFrame::on_wake(wxThreadEvent &)
     // Drain the inline-image inbox: worker threads push downloaded
     // bytes, we write them to the cache table, and if anything
     // landed, re-render the preview pane so the new data: URIs
-    // replace the broken <img> boxes.
-    if (image_cache_process_results(app_) && detail_)
+    // replace the broken <img> boxes. Skip the re-render when
+    // the pane is hidden; reopening it does a fresh render from
+    // scratch (toggle_pane path) that naturally picks up
+    // whatever's in the cache by then.
+    if (image_cache_process_results(app_)
+        && detail_ && pane_shown("entry_detail"))
         detail_->relayout();
     // Note: log persistence is intentionally NOT drained here.
     // on_wake fires very often (per fetch result, per image
@@ -912,6 +934,13 @@ void MainFrame::on_pane_close(wxAuiManagerEvent &e)
 
 void MainFrame::on_list_selected(wxDataViewEvent &)
 {
+    // Only render when the preview pane is actually visible.
+    // Navigating entries with the pane hidden (the "headline
+    // scan" pattern) otherwise ran a full DB detail-load + HTML
+    // build + image-cache pass on every j/k, none of which the
+    // user could see. When the pane opens, toggle_pane does a
+    // one-shot show_entry on the current selection.
+    if (!pane_shown("entry_detail")) return;
     long p = list_->primary();
     if (p >= 0 && (size_t)p < app_->entries.size())
         detail_->show_entry(&app_->entries[(size_t)p]);
@@ -946,7 +975,8 @@ void MainFrame::on_list_context_menu(wxDataViewEvent &event)
         list_->Select(item);
         list_->SetCurrentItem(item);
         long p = list_->primary();
-        if (p >= 0 && (size_t)p < app_->entries.size())
+        if (p >= 0 && (size_t)p < app_->entries.size()
+            && pane_shown("entry_detail"))
             detail_->show_entry(&app_->entries[(size_t)p]);
     }
 
@@ -1269,7 +1299,8 @@ void MainFrame::advance_from(long row)
     if (next < 0) return;
     list_->select_only(next);
     list_->ensure_visible_row(next);
-    detail_->show_entry(&app_->entries[(size_t)next]);
+    if (pane_shown("entry_detail"))
+        detail_->show_entry(&app_->entries[(size_t)next]);
 }
 
 void MainFrame::step_entry(int delta)
