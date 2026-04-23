@@ -59,6 +59,12 @@ set(wxBUILD_INSTALL OFF CACHE BOOL "" FORCE)
 # wxT(...) for literals with non-ASCII glyphs; those are the
 # load-bearing guards that keep the code locale-independent
 # regardless of wx's internal encoding choice.
+#
+# FORCE-set to OFF so an existing CMakeCache from when the flag
+# was briefly ON gets flushed on the next configure — the
+# removal of the previous `set()` line alone wouldn't undo a
+# cached ON value.
+set(wxUSE_UNICODE_UTF8 OFF CACHE BOOL "" FORCE)
 
 # Disable wxWidgets subsystems we don't use. Each one drops source
 # files from wx's own build (faster initial compile) AND removes
