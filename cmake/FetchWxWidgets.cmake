@@ -47,24 +47,24 @@ set(wxBUILD_SAMPLES OFF CACHE BOOL "" FORCE)
 set(wxBUILD_DEMOS   OFF CACHE BOOL "" FORCE)
 set(wxBUILD_INSTALL OFF CACHE BOOL "" FORCE)
 
-# wxUSE_UNICODE_UTF8 was briefly enabled to dodge wxConvLibc on
-# narrow char* → wxString conversions, but it turns out wx's own
-# filesys.cpp (and several other spots) iterates wxString with
-# random GetChar(i) indexing, which is O(n) per call on UTF-8
-# internal storage and O(n²) in a scan loop. The inline-image
-# data: URIs we generate are tens of KB long, so every
-# wxHtmlWindow::SetPage parse turned into a multi-billion-op
-# stall. Back to the default (wchar_t internal, O(1) indexing).
-# We still rely on wxString::FromUTF8 for std::string inputs and
-# wxT(...) for literals with non-ASCII glyphs; those are the
-# load-bearing guards that keep the code locale-independent
-# regardless of wx's internal encoding choice.
+# Do NOT set wxUSE_UNICODE_UTF8=ON. The switch sounds attractive
+# (wxString(const char*) would then interpret bytes as UTF-8
+# directly instead of via locale-dependent wxConvLibc), but wx's
+# own filesys.cpp (and several other spots) iterates wxString
+# with random GetChar(i) indexing — O(n) per call on UTF-8
+# internal storage, O(n²) in a scan loop. The inline-image
+# data: URIs we generate are tens of KB long each, so every
+# wxHtmlWindow::SetPage parse turned into a multi-billion-op UI
+# thread stall.
 #
-# FORCE-set to OFF so an existing CMakeCache from when the flag
-# was briefly ON gets flushed on the next configure — the
-# removal of the previous `set()` line alone wouldn't undo a
-# cached ON value.
-set(wxUSE_UNICODE_UTF8 OFF CACHE BOOL "" FORCE)
+# The locale-safety wins UTF-8 storage gave us are already
+# covered by explicit guards in our own code:
+#   - wxString::FromUTF8 on std::string inputs
+#   - wxT(...) on literal strings with non-ASCII glyphs
+# Those stay load-bearing regardless of wx's internal choice,
+# so leaving this at wx's default (OFF, wchar_t-internal,
+# O(1) indexing) costs us nothing in correctness and dodges
+# the perf landmine.
 
 # Disable wxWidgets subsystems we don't use. Each one drops source
 # files from wx's own build (faster initial compile) AND removes
