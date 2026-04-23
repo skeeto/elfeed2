@@ -485,27 +485,36 @@ void MainFrame::update_status()
     int active = app_->fetches_active.load();
     int total = app_->fetches_total.load();
 
-    // wxT() for format strings containing non-ASCII (… and ·): narrow
-    // literals route through wxConvLibc, which on Windows is CP1252
-    // and mangles UTF-8 bytes. Wide literals skip that path entirely.
+    // Build the status line by concatenation rather than as a single
+    // wxString::Format call. Embedding non-ASCII glyphs (… and ·)
+    // inside the format literal routes through wx's format-string
+    // machinery, which does a narrow/wide conversion dance inside
+    // Format and has hit a null-format-pointer crash on Linux at
+    // wxFormatConverterBase<char>::Convert. Keeping every format
+    // string ASCII-only (so only %d conversions run through Format)
+    // and splicing the glyphs in via wxString += wxT(...) sidesteps
+    // it — the wide literals never touch the narrow-format path.
+    // \u2026 = …, \u00b7 = ·.
     wxString msg;
     if (active > 0) {
-        msg = wxString::Format(
-            wxT("Fetching %d/%d …  %d unread of %d  ·  %d feeds"),
-            active, total, unread,
-            (int)app_->entries.size(),
-            (int)app_->feeds.size());
+        msg = wxString::Format("Fetching %d/%d", active, total);
+        msg += wxT(" \u2026  ");
+        msg += wxString::Format("%d unread of %d",
+                                unread, (int)app_->entries.size());
+        msg += wxT("  \u00b7  ");
+        msg += wxString::Format("%d feeds", (int)app_->feeds.size());
     } else {
         // Append "last fetch" so the user can tell at a glance how
         // stale the view is. We don't poll automatically — this is
-        // the nudge that tells them when it's time to F5.
+        // the nudge that tells them when it's time to fetch.
         wxString last = wxString::FromUTF8(
             format_relative_time(app_->last_fetch));
-        msg = wxString::Format(
-            wxT("%d unread of %d  ·  %d feeds  ·  last fetch: %s"),
-            unread, (int)app_->entries.size(),
-            (int)app_->feeds.size(),
-            last);
+        msg = wxString::Format("%d unread of %d",
+                               unread, (int)app_->entries.size());
+        msg += wxT("  \u00b7  ");
+        msg += wxString::Format("%d feeds", (int)app_->feeds.size());
+        msg += wxT("  \u00b7  last fetch: ");
+        msg += last;
     }
     SetStatusText(msg);
 }
