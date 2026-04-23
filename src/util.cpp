@@ -73,7 +73,29 @@ std::string elfeed_user_agent()
 
 std::string user_data_dir()
 {
+#if defined(__WXGTK__) || defined(__linux__) || defined(__FreeBSD__)
+    // wxStandardPaths::SetFileLayout(FileLayout_XDG) *should* give
+    // us $XDG_DATA_HOME/<app> on Linux, but on wxGTK 3.2 the layout
+    // flip doesn't take effect for GetUserDataDir in practice and
+    // the DB ends up at $HOME/.<app> — the pre-XDG "classic" wx
+    // default. Build the XDG path by hand, mirroring what
+    // user_config_dir already does for $XDG_CONFIG_HOME:
+    //   1. $XDG_DATA_HOME/<app>
+    //   2. $HOME/.local/share/<app>
+    wxString base;
+    if (!wxGetEnv("XDG_DATA_HOME", &base) || base.empty()) {
+        wxString home;
+        if (!wxGetEnv("HOME", &home) || home.empty())
+            home = wxGetHomeDir();
+        base = home + "/.local/share";
+    }
+    wxString app = (wxTheApp && !wxTheApp->GetAppName().empty())
+        ? wxTheApp->GetAppName()
+        : wxString("elfeed2");
+    return (base + "/" + app).utf8_string();
+#else
     return std_paths().GetUserDataDir().utf8_string();
+#endif
 }
 
 std::string user_config_dir()
