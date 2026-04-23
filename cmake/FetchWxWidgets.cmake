@@ -47,6 +47,22 @@ set(wxBUILD_SAMPLES OFF CACHE BOOL "" FORCE)
 set(wxBUILD_DEMOS   OFF CACHE BOOL "" FORCE)
 set(wxBUILD_INSTALL OFF CACHE BOOL "" FORCE)
 
+# Store wxString contents as UTF-8 internally. Default wx builds
+# put a wchar_t-wide representation in wxString and route narrow
+# char* inputs (including every const-string literal in our UI
+# code) through wxConvLibc — which is locale-dependent and
+# truncates UTF-8 bytes silently on non-UTF-8 locales (POSIX, C,
+# containers with minimal locale). With UTF-8 internal, the
+# "convert" step is a no-op: bytes in, bytes out, everywhere the
+# code already treats strings as UTF-8. Slightly more work at
+# the OS API boundary on Windows (UTF-8 → UTF-16) but that's
+# amortized behind event loops in a GUI feed reader, not a tight
+# inner loop. LOCAL builds pick up whatever the distro's wx is
+# built with — usually the default wchar_t — so we still take
+# care to route narrow char* through wxString::FromUTF8 or wxT
+# there for portability.
+set(wxUSE_UNICODE_UTF8 ON CACHE BOOL "" FORCE)
+
 # Disable wxWidgets subsystems we don't use. Each one drops source
 # files from wx's own build (faster initial compile) AND removes
 # the corresponding object code from the linked binary. Re-enable
