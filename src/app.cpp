@@ -1,6 +1,7 @@
 #include "app.hpp"
 #include "data_uri_handler.hpp"
 #include "events.hpp"
+#include "http.hpp"
 #include "main_frame.hpp"
 
 #include <wx/cmdline.h>
@@ -20,6 +21,11 @@
 // Embedded asset blobs (see CMakeLists + cmake/EmbedFile.cmake).
 extern const char embedded_sample_config[];
 extern const char embedded_welcome_html[];
+#ifdef ELFEED_EMBED_CA_BUNDLE
+// Mozilla CA bundle. Only linked in on the Windows+cpp-httplib
+// build — everywhere else we resolve a system CA path at runtime.
+extern const char embedded_cacert_pem[];
+#endif
 
 #include <cstdarg>
 #include <cstdio>
@@ -100,6 +106,35 @@ void elfeed_init(Elfeed *app)
         wxLogNull no_log;
         config_load(app);
     }
+
+#ifdef ELFEED_EMBED_CA_BUNDLE
+    // Windows + cpp-httplib backend: cpp-httplib's mbedTLS glue
+    // wants a filesystem path for set_ca_cert_path, and the XP
+    // target has no system trust store worth probing. Write our
+    // embedded Mozilla bundle to the user data dir (next to the
+    // DB) on every launch — the rewrite is ~220 KB of plain text
+    // and means bumping the bundle in-tree takes effect on the
+    // next run without extra cleanup. http_init() is idempotent,
+    // so subsequent calls from fetch workers are no-ops that
+    // consume the path we set here.
+    {
+        std::string dir = user_data_dir();
+        make_directory(dir);
+        std::string ca_path = dir + "/cacert.pem";
+        wxFile f(wxString::FromUTF8(ca_path), wxFile::write);
+        if (f.IsOpened()) {
+            // Raw bytes, not via wxString — see the sample-config
+            // write above for the rationale (wxConvLibc on
+            // non-UTF-8 locales truncates).
+            f.Write(embedded_cacert_pem,
+                    std::strlen(embedded_cacert_pem));
+            f.Close();
+        }
+        if (std::string err = http_init(ca_path); !err.empty())
+            elfeed_log(app, LOG_ERROR, "http_init: %s", err.c_str());
+    }
+#endif
+
     db_open(app);
     db_load_feeds(app);
 

@@ -65,12 +65,39 @@ endif()
 # pugixml fails with "No document element found." With
 # CPPHTTPLIB_ZLIB_SUPPORT the header-only code auto-adds
 # Accept-Encoding: gzip, deflate and auto-decompresses the
-# response before handing us the body. ZLIB is part of the
-# base system on every platform we target (macOS, every Linux
-# distro, mingw-w64's runtime), so using the system package
-# keeps the build portable without pulling more third-party
-# source.
-find_package(ZLIB REQUIRED)
-target_link_libraries(cpp-httplib INTERFACE ZLIB::ZLIB)
+# response before handing us the body.
+#
+# ZLIB is present on macOS, every Linux distro, and Debian's
+# mingw-w64 sysroot, so prefer the system copy. Homebrew's
+# mingw-w64 toolchain doesn't bundle it though, and that's exactly
+# the cross-compiler the Windows-XP + cpp-httplib builds use — so
+# fall back to fetching source when find_package comes up empty.
+find_package(ZLIB QUIET)
+if(ZLIB_FOUND)
+  message(STATUS "zlib: system (${ZLIB_VERSION_STRING})")
+  target_link_libraries(cpp-httplib INTERFACE ZLIB::ZLIB)
+else()
+  message(STATUS "zlib: downloaded (system copy not found)")
+  include(FetchContent)
+  fetch_content_bundled(zlib zlib)
+  # Silence zlib's own install rule + examples so neither lands
+  # in our install output or wastes compile time.
+  set(SKIP_INSTALL_ALL ON CACHE BOOL "" FORCE)
+  set(ZLIB_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+  FetchContent_Declare(
+    zlib
+    URL      https://github.com/madler/zlib/releases/download/v1.3.1/zlib-1.3.1.tar.gz
+    URL_HASH SHA256=9a93b2b7dfdac77ceba5a558a580e74667dd6fede4585b91eefb60f03b72df23
+  )
+  FetchContent_MakeAvailable(zlib)
+  # zlib's CMake builds both `zlib` (shared) and `zlibstatic`.
+  # Link the static one so the Windows .exe stays self-contained;
+  # the shared .dll is left on the floor. zlib's CMake does not
+  # export include dirs on the target itself, so propagate them
+  # through cpp-httplib's INTERFACE.
+  target_link_libraries(cpp-httplib INTERFACE zlibstatic)
+  target_include_directories(cpp-httplib INTERFACE
+    "${zlib_SOURCE_DIR}" "${zlib_BINARY_DIR}")
+endif()
 target_compile_definitions(cpp-httplib INTERFACE
   CPPHTTPLIB_ZLIB_SUPPORT)

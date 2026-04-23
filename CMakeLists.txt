@@ -25,6 +25,38 @@ if(NOT DEPS MATCHES "^(FETCH|LOCAL)$")
   message(FATAL_ERROR "DEPS must be FETCH or LOCAL (got '${DEPS}')")
 endif()
 
+# HTTP backend selection.
+#   winhttp      — WinHTTP + Schannel (Windows only; uses the OS
+#                  trust store). The recommended path for modern
+#                  Windows (7 / 8.1 / 10 / 11).
+#   cpp-httplib  — cpp-httplib + OpenSSL-or-mbedTLS (TLS backend
+#                  picked by FetchTLS.cmake based on DEPS). The
+#                  default everywhere except Windows; on Windows
+#                  it's opt-in and primarily for Windows XP, whose
+#                  Schannel can't negotiate modern TLS ciphers.
+# The Windows+cpp-httplib build embeds Mozilla's CA bundle
+# (assets/cacert.pem) and writes it to the user data dir at
+# launch — see src/app.cpp.
+if(WIN32)
+  set(ELFEED2_HTTP_BACKEND "winhttp" CACHE STRING
+      "HTTP backend: winhttp or cpp-httplib")
+else()
+  set(ELFEED2_HTTP_BACKEND "cpp-httplib" CACHE STRING
+      "HTTP backend: winhttp or cpp-httplib (winhttp is Windows-only)")
+endif()
+set_property(CACHE ELFEED2_HTTP_BACKEND PROPERTY STRINGS
+  winhttp cpp-httplib)
+if(NOT ELFEED2_HTTP_BACKEND MATCHES "^(winhttp|cpp-httplib)$")
+  message(FATAL_ERROR
+    "ELFEED2_HTTP_BACKEND must be winhttp or cpp-httplib "
+    "(got '${ELFEED2_HTTP_BACKEND}')")
+endif()
+if(ELFEED2_HTTP_BACKEND STREQUAL "winhttp" AND NOT WIN32)
+  message(FATAL_ERROR
+    "ELFEED2_HTTP_BACKEND=winhttp is Windows-only; on this "
+    "platform use cpp-httplib (the default).")
+endif()
+
 # Route compiler invocations through ccache when available. Speeds up
 # clean rebuilds (including wxWidgets and friends, which are a lot of
 # C++ source). Turn off with -DELFEED2_USE_CCACHE=OFF.
@@ -105,11 +137,11 @@ endif()
 include(FetchSQLite)
 include(FetchPugixml)
 
-# TLS + cpp-httplib aren't needed on Windows — http_win.cpp uses
-# WinHTTP and httplib.h is never included. FetchTLS picks the
-# right backend per DEPS mode (OpenSSL for LOCAL, mbedTLS for
-# FETCH) and exposes a `tls` interface target.
-if(NOT WIN32)
+# TLS + cpp-httplib aren't needed for the WinHTTP backend — that
+# path uses Schannel via WinHTTP and httplib.h is never included.
+# FetchTLS picks the right backend per DEPS mode (OpenSSL for
+# LOCAL, mbedTLS for FETCH) and exposes a `tls` interface target.
+if(ELFEED2_HTTP_BACKEND STREQUAL "cpp-httplib")
   include(FetchTLS)
   include(FetchCppHttplib)
 endif()
@@ -160,10 +192,31 @@ if(WIN32)
   set(elfeed2_rc_in  "${CMAKE_CURRENT_SOURCE_DIR}/src/elfeed2.rc.in")
   set(elfeed2_rc_out "${CMAKE_CURRENT_BINARY_DIR}/src/elfeed2.rc")
   configure_file("${elfeed2_rc_in}" "${elfeed2_rc_out}" @ONLY)
-  list(APPEND elfeed_sources src/http_win.cpp "${elfeed2_rc_out}")
+  list(APPEND elfeed_sources "${elfeed2_rc_out}")
   enable_language(RC)
+endif()
+
+# HTTP backend source. Independent of the WIN32 block above because
+# Windows XP users can pick the cpp-httplib backend to bypass
+# Schannel's ciphers; the .rc block always ships on Windows.
+if(ELFEED2_HTTP_BACKEND STREQUAL "winhttp")
+  list(APPEND elfeed_sources src/http_win.cpp)
 else()
-  list(APPEND elfeed_sources src/http_posix.cpp)
+  list(APPEND elfeed_sources src/http_cpphttplib.cpp)
+endif()
+
+# Mozilla CA bundle, only when cpp-httplib is the backend AND
+# we're on Windows. Other platforms resolve a system bundle path
+# at runtime (see http_cpphttplib.cpp); Windows has no equivalent,
+# so we embed ~220 KB of PEM and write it to the user data dir at
+# launch.
+if(WIN32 AND ELFEED2_HTTP_BACKEND STREQUAL "cpp-httplib")
+  elfeed2_embed_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/assets/cacert.pem"
+    "${CMAKE_CURRENT_BINARY_DIR}/embed_cacert_pem.cpp"
+    embedded_cacert_pem)
+  list(APPEND elfeed_sources
+    "${CMAKE_CURRENT_BINARY_DIR}/embed_cacert_pem.cpp")
 endif()
 
 if(APPLE)
@@ -222,13 +275,22 @@ target_link_libraries(elfeed2 PRIVATE
   sqlite3 pugixml
 )
 
-if(WIN32)
+if(ELFEED2_HTTP_BACKEND STREQUAL "winhttp")
   target_link_libraries(elfeed2 PRIVATE winhttp)
 else()
   # `tls` carries both the link libs (OpenSSL or mbedTLS depending
   # on DEPS) AND the right CPPHTTPLIB_*_SUPPORT compile define on
   # its INTERFACE properties — see cmake/FetchTLS.cmake.
   target_link_libraries(elfeed2 PRIVATE tls cpp-httplib)
+  if(WIN32)
+    # cpp-httplib on Windows talks to Winsock; mingw-w64 and MSVC
+    # both need ws2_32 and crypt32 on the link line. (MSVC gets
+    # crypt32 via #pragma comment(lib) in cpp-httplib, but mingw
+    # doesn't honor those pragmas, so list both explicitly.)
+    target_link_libraries(elfeed2 PRIVATE ws2_32 crypt32)
+    target_compile_definitions(elfeed2 PRIVATE
+      ELFEED_EMBED_CA_BUNDLE)
+  endif()
   if(APPLE)
     # Newer cpp-httplib versions (v0.43.1+ as packaged by Homebrew)
     # added native keychain CA enumeration that calls into Security

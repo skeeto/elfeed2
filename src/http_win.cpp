@@ -10,7 +10,10 @@
 #include <windows.h>
 #include <winhttp.h>
 
-std::string http_init() { return {}; }
+// WinHTTP uses the OS trust store (Schannel) directly; we don't
+// need a CA bundle path. `forced_ca_path` is accepted for
+// signature parity with the cpp-httplib backend and ignored.
+std::string http_init(const std::string &) { return {}; }
 
 static std::wstring to_wide(const std::string &s)
 {

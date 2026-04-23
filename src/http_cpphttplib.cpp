@@ -1,5 +1,15 @@
-// HTTP client for POSIX (macOS, Linux, BSD) using cpp-httplib + mbedTLS.
-// On Windows, see http_win.cpp instead.
+// HTTP client built on cpp-httplib + TLS (OpenSSL or mbedTLS,
+// picked at build time by FetchTLS.cmake). Used on macOS, Linux,
+// and BSD always; also on Windows when the build was configured
+// with -DELFEED2_HTTP_BACKEND=cpp-httplib. The Windows default is
+// WinHTTP (see http_win.cpp); the cpp-httplib backend exists for
+// Windows XP, whose WinHTTP / Schannel can't negotiate modern TLS.
+//
+// CA trust: on Unix we probe well-known system bundle paths; on
+// Windows+cpp-httplib the caller (app.cpp) writes an embedded
+// Mozilla cacert.pem to the user data dir and hands us that path
+// via http_init(forced_ca_path) — there's no system trust store
+// to probe on XP.
 
 #include <httplib.h>
 
@@ -11,6 +21,9 @@
 #include <vector>
 
 // Common system CA bundle locations. First file that exists wins.
+// Only used when the caller doesn't supply an explicit path (the
+// Windows+cpp-httplib build always supplies one; none of these
+// paths would resolve there anyway).
 static const char *kCaPaths[] = {
     "/etc/ssl/cert.pem",                                      // macOS, *BSD
     "/etc/ssl/certs/ca-certificates.crt",                     // Debian, Ubuntu
@@ -25,11 +38,25 @@ static std::string g_ca_path;
 static std::mutex g_init_mutex;
 static bool g_inited = false;
 
-std::string http_init()
+std::string http_init(const std::string &forced_ca_path)
 {
     std::lock_guard lock(g_init_mutex);
     if (g_inited) return {};
     g_inited = true;
+
+    // Caller-supplied path wins — used by the Windows+cpp-httplib
+    // build where the embedded Mozilla bundle has just been written
+    // to disk. Other platforms pass an empty string and we probe
+    // system locations.
+    if (!forced_ca_path.empty()) {
+        struct stat st;
+        if (stat(forced_ca_path.c_str(), &st) == 0 &&
+            S_ISREG(st.st_mode)) {
+            g_ca_path = forced_ca_path;
+            return {};
+        }
+        return "CA bundle does not exist: " + forced_ca_path;
+    }
 
     for (const char **p = kCaPaths; *p; p++) {
         struct stat st;

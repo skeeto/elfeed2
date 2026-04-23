@@ -26,10 +26,14 @@ struct HttpResponse {
 // Perform a single HTTP GET. Synchronous; call from a worker thread.
 HttpResponse http_fetch(const HttpRequest &req);
 
-// Initialize the HTTP subsystem (loads CA bundle on POSIX, etc.).
-// Returns empty string on success, or an error message on failure.
-// Safe to call multiple times (only the first call does work).
-std::string http_init();
+// Initialize the HTTP subsystem (resolves the CA bundle to trust,
+// etc.). If `forced_ca_path` is non-empty it's used verbatim;
+// otherwise well-known system paths are probed (cpp-httplib build)
+// or the OS trust store is used implicitly (WinHTTP build, arg
+// ignored). Returns an empty string on success, or an error
+// message on failure. Safe to call multiple times; only the first
+// call does work.
+std::string http_init(const std::string &forced_ca_path = {});
 
 // Streaming HTTP GET. Bytes are delivered via `write`; callers stream
 // them to disk. Both `write` and `progress` return false to cancel.

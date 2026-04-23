@@ -42,6 +42,16 @@ Mingw-w64:
     $ cmake -B build -DCMAKE_TOOLCHAIN_FILE=cmake/Toolchain-Mingw64.cmake
     $ cmake --build build
 
+The Windows build uses WinHTTP + Schannel by default, which is the right
+call for Windows 7 and newer. For Windows XP, whose Schannel can't
+negotiate modern TLS cipher suites, switch the HTTP backend to
+cpp-httplib + mbedTLS; Elfeed2 embeds Mozilla's CA bundle and writes it
+to the user data dir at launch so there's no dependency on a system trust
+store:
+
+    $ cmake -B build -DCMAKE_TOOLCHAIN_FILE=cmake/Toolchain-Mingw64.cmake \
+        -DELFEED2_HTTP_BACKEND=cpp-httplib
+
 ## Configuration and command line
 
     $ elfeed2 [-h] [-d|--db PATH] [-c|--config PATH]
