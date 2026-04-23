@@ -734,10 +734,16 @@ void db_query_entries(Elfeed *app, const Filter &filter,
         }
 
         // Look up feed title once, lazily, for = / ~ checks below.
+        // Hash map rather than a linear scan of app->feeds — when
+        // feed filters are active the previous scan ran O(feeds)
+        // for every kept entry (up to O(entries × feeds) total,
+        // hundreds of thousands of comparisons for a power-user
+        // DB). feed_titles is already html_strip'd and reflects
+        // user_title overrides, so it's also the right string to
+        // match against from a "what the user sees" standpoint.
         auto find_feed_title = [&]() -> std::string {
-            for (auto &f : app->feeds)
-                if (f.url == e.feed_url) return f.title;
-            return {};
+            auto it = app->feed_titles.find(e.feed_url);
+            return it != app->feed_titles.end() ? it->second : std::string{};
         };
 
         // Case-insensitive substring search. We don't treat = / ~
