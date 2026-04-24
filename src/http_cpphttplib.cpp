@@ -22,6 +22,11 @@
 
 #include "http.hpp"
 
+#ifdef CPPHTTPLIB_MBEDTLS_SUPPORT
+#include <mbedtls/error.h>
+#endif
+
+#include <cstdio>
 #include <mutex>
 #include <string>
 #include <sys/stat.h>
@@ -73,6 +78,48 @@ std::string http_init(const std::string &forced_ca_path)
         }
     }
     return "no system CA bundle found";
+}
+
+// Format cpp-httplib's Result error (plus any TLS-specific detail)
+// into a single line suitable for elfeed_log. Without this, every
+// SSL failure collapses to "SSL connection failed" regardless of
+// the underlying cause — unhelpful on old / XP systems where
+// handshake failures are common (clock skew, cipher mismatch,
+// server not in CA bundle, etc.). cpp-httplib surfaces:
+//   ssl_error()          — its ErrorCode category (int)
+//                          (Fatal=4, CertVerifyFailed=6, HostnameMismatch=7…)
+//   ssl_backend_error()  — mbedTLS / OpenSSL backend code (uint64)
+// For mbedTLS builds we additionally resolve the backend code to
+// text via mbedtls_strerror. Safe on any TLS backend — the
+// accessors are always present in an SSL-enabled build; non-SSL
+// failures leave them at 0 and we just emit the top-line message.
+template <class ResultT>
+static std::string describe_http_error(const ResultT &res)
+{
+    std::string out = httplib::to_string(res.error());
+#ifdef CPPHTTPLIB_SSL_ENABLED
+    int        ssl_err = res.ssl_error();
+    uint64_t   backend = res.ssl_backend_error();
+    if (ssl_err != 0 || backend != 0) {
+        char buf[256];
+# ifdef CPPHTTPLIB_MBEDTLS_SUPPORT
+        // mbedTLS returns negative error codes; mbedtls_strerror
+        // expects the negated form. backend is stored as uint64;
+        // cast accordingly.
+        char msg[160] = {0};
+        mbedtls_strerror(-(int)backend, msg, sizeof(msg));
+        std::snprintf(buf, sizeof(buf),
+                      " [ssl_err=%d backend=-0x%04X: %s]",
+                      ssl_err, (unsigned)backend, msg);
+# else
+        std::snprintf(buf, sizeof(buf),
+                      " [ssl_err=%d backend=0x%llX]",
+                      ssl_err, (unsigned long long)backend);
+# endif
+        out += buf;
+    }
+#endif
+    return out;
 }
 
 // Split "https://host:port/path?query" into (scheme+host+port, path+query).
@@ -195,7 +242,7 @@ HttpResponse http_fetch(const HttpRequest &req)
 
         auto res = cli.Get(path, headers);
         if (!res) {
-            out.error = httplib::to_string(res.error());
+            out.error = describe_http_error(res);
             return out;
         }
 
@@ -317,7 +364,7 @@ HttpDownloadResult http_download(const HttpDownloadRequest &req)
 
         if (!res) {
             if (!out.cancelled)
-                out.error = httplib::to_string(res.error());
+                out.error = describe_http_error(res);
             return out;
         }
         out.status = res->status;
