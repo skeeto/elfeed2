@@ -11,6 +11,13 @@
 // via http_init(forced_ca_path) — there's no system trust store
 // to probe on XP.
 
+// XP / Vista-targeted Windows SDKs don't declare the APIs
+// cpp-httplib uses unconditionally (WSAPoll, inet_pton, struct
+// pollfd, CreateFile2, CreateFileMappingFromApp). xp_shims.hpp
+// provides file-scope replacements BEFORE httplib.h so its call
+// sites compile. No-op on every other toolchain.
+#include "xp_shims.hpp"
+
 #include <httplib.h>
 
 #include "http.hpp"
