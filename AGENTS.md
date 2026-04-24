@@ -68,9 +68,16 @@ real publishers for testing.
   `data:` URIs.
 - **`src/data_uri_handler.{hpp,cpp}`** — wxFileSystemHandler for
   `data:` URIs (wx 3.2 has none built in).
-- **`src/http.hpp`** + `http_posix.cpp` / `http_win.cpp` — HTTP
-  client. cpp-httplib + mbedTLS (or OpenSSL with `-DDEPS=LOCAL`)
-  on POSIX; WinHTTP on Windows.
+- **`src/http.hpp`** + `http_cpphttplib.cpp` / `http_win.cpp` — HTTP
+  client. Two backends selectable via the `ELFEED2_HTTP_BACKEND`
+  CMake cache variable: `cpp-httplib` (default everywhere except
+  Windows; uses mbedTLS on FETCH builds, OpenSSL on LOCAL) and
+  `winhttp` (Windows-only, the default there; Schannel-based). The
+  cpp-httplib backend also builds on Windows when explicitly
+  requested — that path exists for Windows XP, where WinHTTP
+  can't negotiate modern TLS. Everything XP-specific (embedded
+  Mozilla CA bundle, Vista+ API shims, mbedTLS config tweaks)
+  lives under that same switch; see `windows-xp.md`.
 - **`src/util.{hpp,cpp}`** — paths, time formatting, filename
   sanitization, MIME helpers, wxDataView column persistence + sort
   helpers.
@@ -227,9 +234,18 @@ avoid accumulator bugs (notably `ytdlp_args`).
   Without this Windows bitmap-scales the window on hidpi displays.
 - VERSIONINFO + ICON resources via `src/elfeed2.rc.in` configured
   with `PROJECT_VERSION_*`.
-- WinHTTP for HTTP — no cpp-httplib involvement.
+- **HTTP backend default: WinHTTP.** Schannel handles TLS, the OS
+  cert store handles trust, no cpp-httplib involvement. Opt into
+  `cpp-httplib` via `-DELFEED2_HTTP_BACKEND=cpp-httplib` for the
+  Windows XP build path — see `windows-xp.md` for everything that
+  entails (embedded CA bundle, Vista+ API shims in
+  `src/xp_shims.hpp`, entropy swap in `src/xp_entropy.cpp`,
+  mbedTLS config overrides in `src/mbedtls_xp_config.h` +
+  `src/mbedtls_xp_fixups.h`, TLS 1.2 cap).
 - mingw cross builds are self-contained (libgcc / libstdc++ /
   winpthread statically linked). See `cmake/Toolchain-Mingw64.cmake`.
+  For XP specifically, target msvcrt (not UCRT) — w64devkit with
+  its `variant-x86.patch` does this.
 
 ### Linux
 
