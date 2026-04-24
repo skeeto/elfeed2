@@ -555,9 +555,25 @@ void db_query_entries(Elfeed *app, const Filter &filter,
     // Build query: FTS MATCH + date range + tag filters go into
     // SQL. Regex/substring filters (leftover complex patterns,
     // and feed-URL = / ~) apply in the C++ scan below.
+    //
+    // Tags ride along as a char(1)-separated bundle via a correlated
+    // subquery. Previously we collected entries first and then ran a
+    // separate batched `... OR (ns=? AND id=?) OR ...` query — two
+    // bound parameters per entry that silently blew past
+    // SQLITE_LIMIT_VARIABLE_NUMBER (999 on older SQLite, 32766 on
+    // current) on a power-user DB, at which point prepare failed
+    // and every entry's Tags column went blank with no log trail.
+    // The correlated subquery hits the entry_tag PK index once per
+    // outer row and has no parameter-count concern at all. char(1)
+    // (SOH) as separator is unambiguous: tags come from user
+    // config / RSS <category> / Atom term="" and never contain
+    // control bytes. group_concat over zero rows returns NULL,
+    // which our sqlite3_column_text reader handles as "no tags".
     std::string sql =
         "SELECT e.namespace, e.id, e.feed_url, e.title, e.link, e.date,"
-        " e.content, e.content_type"
+        " e.content, e.content_type,"
+        " (SELECT group_concat(tag, char(1)) FROM entry_tag"
+        "  WHERE namespace=e.namespace AND entry_id=e.id) AS tags_joined"
         " FROM entry e";
     if (use_fts) {
         // The rowid JOIN uses the implicit PK on entry_fts.rowid;
@@ -693,8 +709,9 @@ void db_query_entries(Elfeed *app, const Filter &filter,
                link.find(m.literal)  != std::string::npos;
     };
 
-    // Tags load in one batched query after the main loop; see below.
-    // Authors / enclosures load on-demand from the preview/download
+    // Tags arrive as column 8, a char(1)-separated bundle produced
+    // by the SELECT's correlated group_concat subquery. Authors /
+    // enclosures still load on-demand from the preview/download
     // paths via db_entry_load_details.
 
     while (sqlite3_step(stmt) == SQLITE_ROW) {
@@ -714,6 +731,23 @@ void db_query_entries(Elfeed *app, const Filter &filter,
             e.content = t;
         if (auto *t = (const char *)sqlite3_column_text(stmt, 7))
             e.content_type = t;
+        if (auto *t = (const char *)sqlite3_column_text(stmt, 8)) {
+            // Split on char(1). Sort afterward to match the old
+            // behavior's "ORDER BY tag" stability — the attr /
+            // color-by-tag path picks "first matching tag" as a
+            // priority, so callers rely on a deterministic order.
+            size_t len = (size_t)sqlite3_column_bytes(stmt, 8);
+            size_t start = 0;
+            for (size_t j = 0; j < len; j++) {
+                if (t[j] == '\x01') {
+                    e.tags.emplace_back(t + start, j - start);
+                    start = j + 1;
+                }
+            }
+            if (start < len)
+                e.tags.emplace_back(t + start, len - start);
+            std::sort(e.tags.begin(), e.tags.end());
+        }
 
         // In-memory regex filtering. Matchers are pre-compiled
         // above the scan loop.
@@ -806,64 +840,6 @@ void db_query_entries(Elfeed *app, const Filter &filter,
     }
 
     sqlite3_finalize(stmt);
-
-    // Batched tag load. Previously this was N prepared-statement
-    // executions (one per kept entry), each costing a SQLite
-    // round-trip. Now it's a single statement whose WHERE is an
-    // OR chain of (namespace=? AND entry_id=?) — SQLite's planner
-    // uses the entry_tag PK index on each alternative, so every
-    // alternative is still an index lookup, and we pay one
-    // round-trip total instead of N. For an empty `out` (the
-    // filter matched nothing) we skip the query entirely.
-    if (!out.empty() && app->db) {
-        std::string tsql = "SELECT namespace, entry_id, tag"
-                           " FROM entry_tag WHERE ";
-        tsql.reserve(out.size() * 40);
-        for (size_t i = 0; i < out.size(); i++) {
-            if (i > 0) tsql += " OR ";
-            tsql += "(namespace=? AND entry_id=?)";
-        }
-        sqlite3_stmt *tstmt = nullptr;
-        if (sqlite3_prepare_v2(app->db, tsql.c_str(), -1, &tstmt, nullptr)
-            == SQLITE_OK) {
-            int tb = 1;
-            for (auto &e : out) {
-                sqlite3_bind_text(tstmt, tb++, e.namespace_.c_str(),
-                                  -1, SQLITE_TRANSIENT);
-                sqlite3_bind_text(tstmt, tb++, e.id.c_str(),
-                                  -1, SQLITE_TRANSIENT);
-            }
-            // Index rows by (namespace, entry_id) so each tag row
-            // drops into the right Entry in O(1). Composite key
-            // uses '\x01' as a separator byte that can't appear in
-            // either namespace or id (both are printable text).
-            std::unordered_map<std::string, size_t> idx;
-            idx.reserve(out.size());
-            for (size_t i = 0; i < out.size(); i++) {
-                std::string k = out[i].namespace_;
-                k += '\x01';
-                k += out[i].id;
-                idx.emplace(std::move(k), i);
-            }
-            while (sqlite3_step(tstmt) == SQLITE_ROW) {
-                const char *ns = (const char *)sqlite3_column_text(tstmt, 0);
-                const char *id = (const char *)sqlite3_column_text(tstmt, 1);
-                const char *tg = (const char *)sqlite3_column_text(tstmt, 2);
-                if (!ns || !id || !tg) continue;
-                std::string k = ns;
-                k += '\x01';
-                k += id;
-                auto it = idx.find(k);
-                if (it != idx.end()) out[it->second].tags.push_back(tg);
-            }
-            sqlite3_finalize(tstmt);
-        }
-        // Sort each entry's tag list to match the old per-entry
-        // query's "ORDER BY tag" — callers and display code may
-        // rely on a stable tag order (the attr/color-by-tag path
-        // picks "first matching tag" as a priority).
-        for (auto &e : out) std::sort(e.tags.begin(), e.tags.end());
-    }
 }
 
 void db_entry_load_details(Elfeed *app, Entry &e)
