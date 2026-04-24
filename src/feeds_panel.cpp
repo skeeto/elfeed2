@@ -239,6 +239,14 @@ void FeedsPanel::on_context_menu(wxDataViewEvent &e)
 void FeedsPanel::on_key(wxKeyEvent &e)
 {
     int code = e.GetKeyCode();
+    // User `preset` bindings beat our built-ins — see the
+    // on_list_key comment in main_frame.cpp. Ctrl+C (platform
+    // copy) still wins because try_preset_key bails on any held
+    // modifier; plain `y` loses to a user `preset y something`
+    // if they've defined one.
+    if (auto *frame = dynamic_cast<MainFrame *>(wxGetTopLevelParent(this))) {
+        if (frame->try_preset_key(e)) return;
+    }
     // `y` matches the entry list's "copy link" convention; Cmd/Ctrl+C
     // covers the OS-standard expectation. Both copy the canonical URL
     // when known, otherwise the feed URL — the URL the user most
@@ -255,13 +263,6 @@ void FeedsPanel::on_key(wxKeyEvent &e)
             copy_to_clipboard(target);
         }
         return;
-    }
-    // Fall through to the main frame's preset dispatch so user
-    // `preset` keys work even when this panel has focus. If no
-    // preset matches, the event continues to default handlers
-    // via Skip below.
-    if (auto *frame = dynamic_cast<MainFrame *>(wxGetTopLevelParent(this))) {
-        if (frame->try_preset_key(e)) return;
     }
     e.Skip();
 }

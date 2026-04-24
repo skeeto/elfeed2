@@ -54,9 +54,14 @@ inline-images        yes
 
 # ---- Filter presets (single-key shortcuts) -------------------------
 # `preset KEY FILTER` binds KEY to apply that filter when the entry
-# list has focus. The built-in keys (j/k/g/G/u/r/b/y/d/f/s//) take
-# precedence; everything else (letters, digits, punctuation) is
-# fair game. Shift turns "h" into "H", so you can bind both.
+# list, feeds, or preview pane has focus. User presets take
+# precedence over built-ins — if you want `r` to jump to your
+# favorite filter, rebind it, and the built-in mark-as-read is
+# yours to replace. (This also means new built-ins in future
+# releases can't silently stomp your config.) Modifier keys are
+# reserved for native shortcuts (Ctrl+W, Cmd+Q, …) and can't be
+# preset targets. Shift counts as a case modifier for letters, so
+# `preset h` and `preset H` are independent.
 
 preset h             @1-month +unread
 

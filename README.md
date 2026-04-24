@@ -131,8 +131,10 @@ including bold for unread entries.
 ### Filter presets
 
 A `preset KEY FILTER` directive binds a single key to a filter string.
-While the entry list has focus, pressing that key jumps the filter bar
-(and the listing) to that filter. Built-in keys take precedence.
+While the entry list, feeds, or preview pane has focus, pressing that
+key jumps the filter bar (and the listing) to that filter. User presets
+take precedence over built-in keys, so a rebind replaces the built-in
+of the same letter.
 
     preset h @1-month +unread
     preset t @1-month +youtube

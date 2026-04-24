@@ -1099,6 +1099,13 @@ void MainFrame::on_list_key(wxKeyEvent &e)
         }
         return;
     }
+    // User `preset` bindings beat our built-ins. Rationale: once
+    // a user's config puts `preset r some-filter` in their file,
+    // that has to win, or adding a future built-in on `r` would
+    // silently stomp their rebind. try_preset_key bails on any
+    // held modifier and on non-printable codes, so the Ctrl+L
+    // and Escape handlers above still get through untouched.
+    if (try_preset_key(e)) return;
     switch (code) {
     case 'J': if (plain) { move_selection(+1); return; } break;
     case 'K': if (plain) { move_selection(-1); return; } break;
@@ -1160,8 +1167,6 @@ void MainFrame::on_list_key(wxKeyEvent &e)
         break;
     }
 
-    if (try_preset_key(e)) return;
-
     e.Skip();
 }
 
@@ -1192,6 +1197,11 @@ void MainFrame::on_detail_key(wxKeyEvent &e)
     // Skip() for anything we don't recognize.
     int code = e.GetKeyCode();
     bool plain = !e.HasAnyModifiers();
+    // User presets beat reader-mode built-ins too — see the
+    // on_list_key comment. try_preset_key bails on non-printable
+    // codes (WXK_ESCAPE is 0x1B, below the 0x20 floor), so
+    // "Escape exits reader mode" is still always available.
+    if (try_preset_key(e)) return;
     if (plain) {
         switch (code) {
         case WXK_ESCAPE:
@@ -1219,7 +1229,6 @@ void MainFrame::on_detail_key(wxKeyEvent &e)
             return;
         }
     }
-    if (try_preset_key(e)) return;
     e.Skip();
 }
 
