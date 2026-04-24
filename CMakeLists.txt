@@ -145,20 +145,39 @@ if(ELFEED2_HTTP_BACKEND STREQUAL "cpp-httplib")
   include(FetchTLS)
   include(FetchCppHttplib)
 
-  # On Windows, swap mbedTLS's entropy source from BCryptGenRandom
-  # (bcrypt.dll, Vista+) to CryptGenRandom (advapi32.dll, XP+) via
-  # the documented MBEDTLS_ENTROPY_HARDWARE_ALT hook. PUBLIC so the
-  # defines propagate to elfeed2's own TUs that include mbedtls
-  # headers — build_info.h gets processed identically everywhere
-  # and no entropy path is silently double-installed. The
-  # implementation is in src/xp_entropy.cpp. Only has any effect
-  # for DEPS=FETCH (mbedTLS path); on DEPS=LOCAL, FetchTLS
-  # resolves to OpenSSL and these targets don't exist.
+  # On Windows, retune mbedTLS for XP compatibility. Only has any
+  # effect for DEPS=FETCH (mbedTLS path); on DEPS=LOCAL, FetchTLS
+  # resolves to OpenSSL and the `mbed*` targets don't exist.
+  #
+  # Entropy:
+  #   MBEDTLS_NO_PLATFORM_ENTROPY drops the built-in Windows
+  #   BCryptGenRandom path (bcrypt.dll, Vista+).
+  #   MBEDTLS_ENTROPY_HARDWARE_ALT wires in our
+  #   mbedtls_hardware_poll() in src/xp_entropy.cpp, which uses
+  #   CryptGenRandom via advapi32.dll — XP-safe.
+  #
+  # vsnprintf_s:
+  #   Force-included mbedtls_xp_fixups.h runs <stdio.h> and then
+  #   #undef _TRUNCATE so platform.c's `#if defined(_TRUNCATE)`
+  #   picks the plain-vsnprintf fallback branch instead of the
+  #   vsnprintf_s path. (The compiled-out-but-defined function
+  #   approach — override MBEDTLS_PLATFORM_STD_VSNPRINTF + rely on
+  #   --gc-sections — doesn't work on mingw-ld because the PE
+  #   .pdata/.xdata exception tables cross-reference the .text
+  #   sections and anchor them live.)
+  #
+  # PUBLIC propagates the defines to elfeed2's own TUs that include
+  # mbedtls headers (through cpp-httplib) so build_info.h sees the
+  # same configuration everywhere. The -include is PRIVATE —
+  # only mbedTLS's own TUs need the _TRUNCATE fixup, not the
+  # consumers that pull in mbedtls/*.h.
   if(WIN32 AND TARGET mbedcrypto)
     foreach(_t mbedcrypto mbedx509 mbedtls)
       target_compile_definitions(${_t} PUBLIC
         MBEDTLS_NO_PLATFORM_ENTROPY
         MBEDTLS_ENTROPY_HARDWARE_ALT)
+      target_compile_options(${_t} PRIVATE
+        -include ${CMAKE_CURRENT_SOURCE_DIR}/src/mbedtls_xp_fixups.h)
     endforeach()
   endif()
 endif()
