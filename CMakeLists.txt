@@ -144,6 +144,23 @@ include(FetchPugixml)
 if(ELFEED2_HTTP_BACKEND STREQUAL "cpp-httplib")
   include(FetchTLS)
   include(FetchCppHttplib)
+
+  # On Windows, swap mbedTLS's entropy source from BCryptGenRandom
+  # (bcrypt.dll, Vista+) to CryptGenRandom (advapi32.dll, XP+) via
+  # the documented MBEDTLS_ENTROPY_HARDWARE_ALT hook. PUBLIC so the
+  # defines propagate to elfeed2's own TUs that include mbedtls
+  # headers — build_info.h gets processed identically everywhere
+  # and no entropy path is silently double-installed. The
+  # implementation is in src/xp_entropy.cpp. Only has any effect
+  # for DEPS=FETCH (mbedTLS path); on DEPS=LOCAL, FetchTLS
+  # resolves to OpenSSL and these targets don't exist.
+  if(WIN32 AND TARGET mbedcrypto)
+    foreach(_t mbedcrypto mbedx509 mbedtls)
+      target_compile_definitions(${_t} PUBLIC
+        MBEDTLS_NO_PLATFORM_ENTROPY
+        MBEDTLS_ENTROPY_HARDWARE_ALT)
+    endforeach()
+  endif()
 endif()
 
 # --- Elfeed ---
@@ -216,7 +233,12 @@ if(WIN32 AND ELFEED2_HTTP_BACKEND STREQUAL "cpp-httplib")
     "${CMAKE_CURRENT_BINARY_DIR}/embed_cacert_pem.cpp"
     embedded_cacert_pem)
   list(APPEND elfeed_sources
-    "${CMAKE_CURRENT_BINARY_DIR}/embed_cacert_pem.cpp")
+    "${CMAKE_CURRENT_BINARY_DIR}/embed_cacert_pem.cpp"
+    # Replaces mbedTLS's default BCryptGenRandom-based entropy
+    # with one that uses CryptGenRandom from advapi32 — the only
+    # one available on XP. See src/xp_entropy.cpp + the mbedTLS
+    # target defines below.
+    src/xp_entropy.cpp)
 endif()
 
 if(APPLE)
@@ -287,7 +309,9 @@ else()
     # both need ws2_32 and crypt32 on the link line. (MSVC gets
     # crypt32 via #pragma comment(lib) in cpp-httplib, but mingw
     # doesn't honor those pragmas, so list both explicitly.)
-    target_link_libraries(elfeed2 PRIVATE ws2_32 crypt32)
+    # advapi32 is for our XP-safe entropy source
+    # (CryptGenRandom / CryptAcquireContextA in src/xp_entropy.cpp).
+    target_link_libraries(elfeed2 PRIVATE ws2_32 crypt32 advapi32)
     target_compile_definitions(elfeed2 PRIVATE
       ELFEED_EMBED_CA_BUNDLE)
   endif()
