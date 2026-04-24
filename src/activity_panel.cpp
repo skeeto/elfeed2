@@ -72,26 +72,20 @@ static wxColour lerp_colour(wxColour a, wxColour b, double t)
         (unsigned char)(a.Blue()  + (b.Blue()  - a.Blue())  * t));
 }
 
-// Jet-like ramp: seven stops spanning the full hue wheel from
-// cool to warm. Unlike a single-hue lightness ramp (which tops
-// out in perceived dynamic range because we only vary one channel),
-// jet crosses through multiple hues — dark blue, blue, cyan,
-// green, yellow, red, dark red — so every part of the distribution
-// lands on a visibly distinct color. Well-known downsides (not
-// perceptually uniform in luminance, tricky for some kinds of
-// colorblindness) are acceptable here because the task is "spot
-// the pattern at a glance," not precise quantitative reading.
+// Cool ramp: cyan through blue to purple. Like the jet ramp it
+// spans multiple hues for good visual separation, but stays
+// within the cool half of the hue wheel — no yellows or reds.
 namespace {
 struct Stop { double t; wxColour c; };
 }
 static const Stop jet_stops[] = {
-    {0.00, wxColour(  0,   0, 143)},
-    {0.11, wxColour(  0,   0, 255)},
-    {0.36, wxColour(  0, 255, 255)},
-    {0.52, wxColour(  0, 255,   0)},
-    {0.68, wxColour(255, 255,   0)},
-    {0.87, wxColour(255,   0,   0)},
-    {1.00, wxColour(143,   0,   0)},
+    {0.00, wxColour(  0, 255, 255)},
+    {0.17, wxColour(  0, 200, 255)},
+    {0.33, wxColour(  0, 100, 255)},
+    {0.50, wxColour( 50,   0, 255)},
+    {0.67, wxColour(130,   0, 220)},
+    {0.83, wxColour(200,  50, 180)},
+    {1.00, wxColour(230, 100, 150)},
 };
 
 static wxColour jet_at(double t)
