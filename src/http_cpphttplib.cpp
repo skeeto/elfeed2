@@ -23,7 +23,10 @@
 #include "http.hpp"
 
 #ifdef CPPHTTPLIB_MBEDTLS_SUPPORT
+#include <mbedtls/ctr_drbg.h>
+#include <mbedtls/entropy.h>
 #include <mbedtls/error.h>
+#include <mbedtls/x509_crt.h>
 #endif
 
 #include <cstdio>
@@ -65,19 +68,88 @@ std::string http_init(const std::string &forced_ca_path)
         if (stat(forced_ca_path.c_str(), &st) == 0 &&
             S_ISREG(st.st_mode)) {
             g_ca_path = forced_ca_path;
-            return {};
+        } else {
+            return "CA bundle does not exist: " + forced_ca_path;
         }
-        return "CA bundle does not exist: " + forced_ca_path;
+    } else {
+        bool found = false;
+        for (const char **p = kCaPaths; *p; p++) {
+            struct stat st;
+            if (stat(*p, &st) == 0 && S_ISREG(st.st_mode)) {
+                g_ca_path = *p;
+                found = true;
+                break;
+            }
+        }
+        if (!found) return "no system CA bundle found";
     }
 
-    for (const char **p = kCaPaths; *p; p++) {
-        struct stat st;
-        if (stat(*p, &st) == 0 && S_ISREG(st.st_mode)) {
-            g_ca_path = *p;
-            return {};
+#ifdef CPPHTTPLIB_MBEDTLS_SUPPORT
+    // Self-test the two things most likely to fail at handshake
+    // time (where cpp-httplib can only report
+    // MBEDTLS_ERR_SSL_INTERNAL_ERROR and we're left guessing):
+    //
+    //   1. CA bundle parsing. mbedtls_x509_crt_parse_file is what
+    //      cpp-httplib calls internally via set_ca_cert_path; if
+    //      the file is unreadable or malformed, parse returns < 0
+    //      and the handshake later can't verify anything.
+    //
+    //   2. Entropy / CTR_DRBG seeding. With MBEDTLS_NO_PLATFORM_ENTROPY
+    //      the only source is our mbedtls_hardware_poll (see
+    //      src/xp_entropy.cpp). If CryptAcquireContextA / CryptGenRandom
+    //      fail on this platform — or return short reads — the
+    //      seed fails and TLS is dead in the water.
+    //
+    // Running both probes up front produces a log line that names
+    // the actual failure instead of a generic SSL error later.
+    {
+        mbedtls_x509_crt chain;
+        mbedtls_x509_crt_init(&chain);
+        int ret = mbedtls_x509_crt_parse_file(&chain, g_ca_path.c_str());
+        int cert_count = 0;
+        for (mbedtls_x509_crt *c = &chain; c && c->version != 0; c = c->next)
+            cert_count++;
+        mbedtls_x509_crt_free(&chain);
+        if (ret < 0) {
+            char msg[160] = {0};
+            mbedtls_strerror(ret, msg, sizeof(msg));
+            char out[320];
+            std::snprintf(out, sizeof(out),
+                          "CA parse failed: %s [%d certs before err] "
+                          "path=%s (mbedtls=-0x%04X: %s)",
+                          g_ca_path.c_str(), cert_count, g_ca_path.c_str(),
+                          (unsigned)(-ret), msg);
+            return out;
+        }
+        // ret > 0 means "that many certs were skipped but others
+        // parsed"; a non-zero cert_count is healthy.
+        if (cert_count == 0)
+            return "CA parse loaded 0 certs from " + g_ca_path;
+    }
+    {
+        mbedtls_entropy_context entropy;
+        mbedtls_ctr_drbg_context drbg;
+        mbedtls_entropy_init(&entropy);
+        mbedtls_ctr_drbg_init(&drbg);
+        const char pers[] = "elfeed2_init";
+        int ret = mbedtls_ctr_drbg_seed(
+            &drbg, mbedtls_entropy_func, &entropy,
+            (const unsigned char *)pers, sizeof(pers) - 1);
+        mbedtls_ctr_drbg_free(&drbg);
+        mbedtls_entropy_free(&entropy);
+        if (ret != 0) {
+            char msg[160] = {0};
+            mbedtls_strerror(ret, msg, sizeof(msg));
+            char out[256];
+            std::snprintf(out, sizeof(out),
+                          "entropy seed failed (mbedtls=-0x%04X: %s)",
+                          (unsigned)(-ret), msg);
+            return out;
         }
     }
-    return "no system CA bundle found";
+#endif
+
+    return {};
 }
 
 // Format cpp-httplib's Result error (plus any TLS-specific detail)
