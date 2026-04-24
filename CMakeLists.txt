@@ -149,33 +149,28 @@ if(ELFEED2_HTTP_BACKEND STREQUAL "cpp-httplib")
   # effect for DEPS=FETCH (mbedTLS path); on DEPS=LOCAL, FetchTLS
   # resolves to OpenSSL and the `mbed*` targets don't exist.
   #
-  # Entropy:
-  #   MBEDTLS_NO_PLATFORM_ENTROPY drops the built-in Windows
-  #   BCryptGenRandom path (bcrypt.dll, Vista+).
-  #   MBEDTLS_ENTROPY_HARDWARE_ALT wires in our
-  #   mbedtls_hardware_poll() in src/xp_entropy.cpp, which uses
-  #   CryptGenRandom via advapi32.dll — XP-safe.
+  # Two knobs:
+  #   1. MBEDTLS_USER_CONFIG_FILE (PUBLIC) — points every mbedtls
+  #      TU *and* consumer TU (through transitive propagation) at
+  #      src/mbedtls_xp_config.h for compile-time config: entropy
+  #      source swap, TLS 1.3 disable, etc. Since the file is
+  #      loaded by build_info.h right after the default
+  #      mbedtls_config.h, `#undef`s here cancel defaults —
+  #      something -D can't do.
+  #   2. -include src/mbedtls_xp_fixups.h (PRIVATE) — force-include
+  #      at the top of every mbedtls TU to clear _TRUNCATE so
+  #      platform.c picks the plain-vsnprintf fallback. See that
+  #      header for why a compile define isn't enough.
   #
-  # vsnprintf_s:
-  #   Force-included mbedtls_xp_fixups.h runs <stdio.h> and then
-  #   #undef _TRUNCATE so platform.c's `#if defined(_TRUNCATE)`
-  #   picks the plain-vsnprintf fallback branch instead of the
-  #   vsnprintf_s path. (The compiled-out-but-defined function
-  #   approach — override MBEDTLS_PLATFORM_STD_VSNPRINTF + rely on
-  #   --gc-sections — doesn't work on mingw-ld because the PE
-  #   .pdata/.xdata exception tables cross-reference the .text
-  #   sections and anchor them live.)
-  #
-  # PUBLIC propagates the defines to elfeed2's own TUs that include
-  # mbedtls headers (through cpp-httplib) so build_info.h sees the
-  # same configuration everywhere. The -include is PRIVATE —
-  # only mbedTLS's own TUs need the _TRUNCATE fixup, not the
-  # consumers that pull in mbedtls/*.h.
+  # The MBEDTLS_USER_CONFIG_FILE value must include the surrounding
+  # quotes so the preprocessor's `#include MBEDTLS_USER_CONFIG_FILE`
+  # resolves to a string-literal include.
   if(WIN32 AND TARGET mbedcrypto)
+    set(_xp_mbedtls_cfg
+      "\"${CMAKE_CURRENT_SOURCE_DIR}/src/mbedtls_xp_config.h\"")
     foreach(_t mbedcrypto mbedx509 mbedtls)
       target_compile_definitions(${_t} PUBLIC
-        MBEDTLS_NO_PLATFORM_ENTROPY
-        MBEDTLS_ENTROPY_HARDWARE_ALT)
+        MBEDTLS_USER_CONFIG_FILE=${_xp_mbedtls_cfg})
       target_compile_options(${_t} PRIVATE
         -include ${CMAKE_CURRENT_SOURCE_DIR}/src/mbedtls_xp_fixups.h)
     endforeach()
