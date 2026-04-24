@@ -23,6 +23,7 @@
 #include <wx/menu.h>
 #include <wx/stattext.h>
 #include <wx/textctrl.h>
+#include <wx/textdlg.h>
 #include <wx/msgdlg.h>
 #include <wx/srchctrl.h>
 #include <wx/sizer.h>
@@ -37,6 +38,7 @@ enum {
     ID_ImportClassic,
     ID_ReloadConfig,
     ID_ReclaimSpace,
+    ID_DownloadURL,
     ID_ToggleFeeds,
     ID_TogglePreview,
     ID_ToggleLog,
@@ -179,6 +181,13 @@ void MainFrame::build_menus()
     m_elfeed->Append(ID_Fetch, "&Fetch All\tF5");
 #endif
     m_elfeed->Append(ID_ReloadConfig, "&Reload Config\tCtrl+Shift+R");
+    // Download &URL... — `U` mnemonic so we don't collide with the
+    // `D` that's already in "Reclaim &Disk Space…" below. The
+    // menu accelerator is Ctrl+Shift+D; the bare `p` key also
+    // triggers this when the entry list has focus
+    // (see on_list_key).
+    m_elfeed->Append(ID_DownloadURL,
+                     wxT("Download &URL…\tCtrl+Shift+D"));
     m_elfeed->AppendSeparator();
     m_elfeed->Append(ID_ImportClassic, wxT("&Import Classic Elfeed Index…"));
     // Drops the image LRU and VACUUMs the DB. Named for what the
@@ -361,6 +370,9 @@ void MainFrame::bind_events()
     Bind(wxEVT_MENU, &MainFrame::on_reload_config,    this, ID_ReloadConfig);
     Bind(wxEVT_MENU, &MainFrame::on_import_classic,   this, ID_ImportClassic);
     Bind(wxEVT_MENU, &MainFrame::on_reclaim_space,    this, ID_ReclaimSpace);
+    Bind(wxEVT_MENU,
+         [this](wxCommandEvent &) { action_download_url(); },
+         ID_DownloadURL);
     Bind(wxEVT_MENU, &MainFrame::on_toggle_feeds,     this, ID_ToggleFeeds);
     Bind(wxEVT_MENU, &MainFrame::on_toggle_preview,   this, ID_TogglePreview);
     Bind(wxEVT_MENU, &MainFrame::on_toggle_log,       this, ID_ToggleLog);
@@ -1101,6 +1113,7 @@ void MainFrame::on_list_key(wxKeyEvent &e)
     case 'R': if (plain) { action_mark_read();        return; } break;
     case 'B': if (plain) { action_open_in_browser();  return; } break;
     case 'Y': if (plain) { action_copy_link();        return; } break;
+    case 'P': if (plain) { action_download_url();     return; } break;
     case 'D':
         // Lowercase d: download the selected entries (per-entry
         // path chosen in action_download). Capital D (Shift+D):
@@ -1468,5 +1481,173 @@ void MainFrame::action_download()
     if (pane_shown("downloads") && downloads_) downloads_->refresh();
     if (sel.size() == 1) advance_from(sel[0]);
     visual_anchor_ = -1;
+    update_status();
+}
+
+namespace {
+
+// Does the URL's path end in a media / document extension we can
+// download directly via HTTP, bypassing yt-dlp? `mime_to_extension`
+// with an empty content-type falls back to a URL-trailing-alnum
+// extractor, which returns "bin" when nothing recognizable is
+// there — that's our "not a direct download" signal. Everything
+// else (plain http(s), query strings, fragment tails) is fine —
+// `mime_to_extension` already peels them off before looking at
+// the dot.
+bool url_is_direct_download(const std::string &url)
+{
+    static const char *known[] = {
+        "mp3", "m4a", "aac", "ogg", "opus", "flac", "wav", "webm",
+        "mp4", "mpeg", "mov", "mkv",
+        "pdf", "zip", "epub",
+        "jpg", "jpeg", "png", "gif", "webp",
+        nullptr,
+    };
+    std::string ext = mime_to_extension("", url);
+    for (const char **p = known; *p; p++)
+        if (ext == *p) return true;
+    return false;
+}
+
+// Extract (host, basename-without-extension) from a URL for the
+// HTTP-direct filename rule. No entry title or feed title is
+// available for an ad-hoc download, so we fall back to the URL's
+// own hostname + trailing path segment — a best-effort label
+// that's still stable across disambiguate_path collisions.
+void url_host_and_basename(const std::string &url,
+                           std::string &host, std::string &base)
+{
+    host.clear();
+    base.clear();
+    size_t scheme_end = url.find("://");
+    size_t host_start = (scheme_end == std::string::npos)
+                            ? 0
+                            : scheme_end + 3;
+    size_t path_start = url.find('/', host_start);
+    host = (path_start == std::string::npos)
+               ? url.substr(host_start)
+               : url.substr(host_start, path_start - host_start);
+    // Strip userinfo@ and :port
+    if (auto at = host.find('@'); at != std::string::npos)
+        host = host.substr(at + 1);
+    if (auto col = host.find(':'); col != std::string::npos)
+        host = host.substr(0, col);
+
+    if (path_start != std::string::npos) {
+        size_t path_end = url.find_first_of("?#", path_start);
+        if (path_end == std::string::npos) path_end = url.size();
+        std::string path = url.substr(path_start, path_end - path_start);
+        size_t last_slash = path.rfind('/');
+        std::string fname = (last_slash == std::string::npos)
+                                ? path
+                                : path.substr(last_slash + 1);
+        size_t dot = fname.rfind('.');
+        base = (dot == std::string::npos) ? fname
+                                          : fname.substr(0, dot);
+    }
+}
+
+} // namespace
+
+void MainFrame::action_download_url()
+{
+    // Pre-fill the dialog from the clipboard when it looks URL-ish.
+    // The heuristic is deliberately loose — any scheme (`foo://`)
+    // or a `www.` prefix counts — because the cost of a bad guess
+    // is a one-keystroke deletion in the dialog, and the win is
+    // the common copy-from-browser flow reduces to two keystrokes
+    // total (`p`, Enter).
+    // Try CLIPBOARD first (the Ctrl+C / Cmd+C buffer — what
+    // browsers populate on copy, universally). If that doesn't
+    // surface a URL, fall back to PRIMARY (the X11 / Wayland
+    // highlight-to-select selection) so `select URL in terminal,
+    // switch, p` works without a separate Ctrl+C step. wx's
+    // UsePrimarySelection toggle is a no-op on macOS and
+    // Windows, so those platforms simply evaluate the CLIPBOARD
+    // branch and exit — no redundant second read.
+    wxString initial;
+    auto read_clipboard_url = [](wxString &out) {
+        if (!wxTheClipboard->IsSupported(wxDF_UNICODETEXT) &&
+            !wxTheClipboard->IsSupported(wxDF_TEXT)) {
+            return;
+        }
+        // Check both text formats: browsers on macOS and modern
+        // Windows put URLs on the clipboard as wxDF_UNICODETEXT
+        // (UTF-16 on Windows, UTF-8 on Unix-ish); wxDF_TEXT is
+        // the legacy ANSI format. Either is fine for
+        // wxTextDataObject, which normalizes both into a wxString.
+        wxTextDataObject data;
+        if (!wxTheClipboard->GetData(data)) return;
+        wxString cb = data.GetText();
+        cb.Trim(true).Trim(false);
+        if (cb.Contains(wxT("://")) || cb.StartsWith(wxT("www.")))
+            out = cb;
+    };
+    if (wxTheClipboard->Open()) {
+        read_clipboard_url(initial);
+        if (initial.empty()) {
+            // Round-trip through PRIMARY. UsePrimarySelection is
+            // sticky on the global wxTheClipboard, so the final
+            // call restores the Ctrl+C/V default for anything
+            // else in the app (e.g. action_copy_link) that runs
+            // later.
+            wxTheClipboard->UsePrimarySelection(true);
+            read_clipboard_url(initial);
+            wxTheClipboard->UsePrimarySelection(false);
+        }
+        wxTheClipboard->Close();
+    }
+
+    wxTextEntryDialog dlg(
+        this,
+        wxT("URL to download. Direct media URLs (.mp3, .mp4, .pdf, …) "
+            "are fetched via HTTP; anything else goes through yt-dlp."),
+        wxT("Download URL"),
+        initial,
+        wxOK | wxCANCEL);
+    // Default dialog is too narrow for real-world URLs; size-hint
+    // a wider field. The text control is the dialog's own child;
+    // resizing the dialog lets it grow too.
+    dlg.SetSize(FromDIP(wxSize(560, -1)));
+    dlg.CentreOnParent();
+    if (dlg.ShowModal() != wxID_OK) return;
+
+    std::string url = dlg.GetValue().utf8_string();
+    while (!url.empty() && std::isspace((unsigned char)url.front()))
+        url.erase(0, 1);
+    while (!url.empty() && std::isspace((unsigned char)url.back()))
+        url.pop_back();
+    if (url.empty()) return;
+
+    if (url_is_direct_download(url)) {
+        std::string host, basename;
+        url_host_and_basename(url, host, basename);
+        // Filename: YYYYMMDD-host-basename.ext. Mirrors the
+        // enclosure-download rule (date first for stable chrono
+        // sort in the user's Downloads folder), with host + URL
+        // basename in place of feed/entry titles we don't have.
+        std::string base = format_date_compact((double)::time(nullptr));
+        if (!host.empty())     base += "-" + sanitize_filename(host);
+        if (!basename.empty()) base += "-" + sanitize_filename(basename);
+        std::string ext = mime_to_extension("", url);
+        std::string dir = app_->download_dir.empty()
+                              ? user_home_dir() + "/Downloads"
+                              : app_->download_dir;
+        make_directory(dir);
+        std::string path = disambiguate_path(dir, base, ext);
+        // Title seeded with the URL; there's no better label to
+        // start with, and the Downloads panel's Name column is
+        // driven by the output filename once the download begins.
+        download_enqueue_http(app_, url, url, path);
+    } else {
+        // Title = URL for the same reason; yt-dlp will later emit
+        // a real filename we surface in the Name column as soon
+        // as its progress output begins.
+        download_enqueue(app_, url, url, /*is_video=*/true);
+    }
+
+    download_tick(app_);
+    if (pane_shown("downloads") && downloads_) downloads_->refresh();
+    flash_status("Download queued");
     update_status();
 }

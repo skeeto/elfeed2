@@ -127,6 +127,12 @@ private:
     void action_open_in_browser();
     void action_copy_link();
     void action_download();
+    // Prompt for a URL (pre-filled from clipboard when URL-shaped)
+    // and enqueue it in the Downloads panel. Routes URLs with a
+    // known media/document extension to the HTTP-direct path with a
+    // generated filename; otherwise hands off to yt-dlp just like
+    // the no-enclosure entry-download path.
+    void action_download_url();
 
     Elfeed *app_;
     wxSearchCtrl *filter_ = nullptr;
