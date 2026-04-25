@@ -252,9 +252,17 @@ void db_add_entries(Elfeed *app, std::vector<Entry> &entries);
 // work to the visible viewport (plus scroll buffer) — classic
 // Elfeed's "stop once the window is filled" trick. `#N` in the
 // filter still wins when present.
+//
+// `ascending` flips the SQL ORDER BY from date DESC to date ASC.
+// The caller passes true only when the listing's display sort is
+// Date column ascending — that's the one configuration where the
+// cap stays correctness-preserving without SQL streaming in
+// display order. For non-date display sorts the caller already
+// passes default_limit=0 (no cap), so the order doesn't matter.
 void db_query_entries(Elfeed *app, const Filter &filter,
                       std::vector<Entry> &out,
-                      int default_limit = 0);
+                      int default_limit = 0,
+                      bool ascending = false);
 // Fill in authors and enclosures for a single Entry. The listing
 // query deliberately skips these because they're needed only when
 // an entry is actually shown (preview pane) or acted on (download

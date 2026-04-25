@@ -440,8 +440,22 @@ void MainFrame::requery(int default_limit)
     // typing passes the viewport size; everything else (blur,
     // Ctrl+L, import, fetch arrival, preset keys) passes 0 for
     // the full match set.
+    //
+    // The cap is correctness-preserving only when SQL streams in
+    // display order. SQL orders by date, so the cap stays valid
+    // when the listing is sorted on the Date column (either
+    // direction) or has no explicit sort key (col < 0; the
+    // panel's natural order is then date desc, matching SQL's
+    // default). For Title/Feed/Tags sort, the panel re-sorts the
+    // returned set in C++, and a date-streamed cap would have
+    // taken the wrong subset of rows — lift the cap so the
+    // resort sees every match.
+    DataViewSort s = dataview_current_sort(list_);
+    bool sql_ascending = (s.col == 0 && s.ascending);
+    bool stream_matches_display = (s.col == 0 || s.col < 0);
+    int effective_default = stream_matches_display ? default_limit : 0;
     db_query_entries(app_, app_->current_filter, app_->entries,
-                     default_limit);
+                     effective_default, sql_ascending);
     list_->refresh_items();
     // Note: activity_ is filter-independent, driven by the DB
     // directly, so a requery (which runs on every filter keystroke)

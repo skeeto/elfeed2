@@ -499,7 +499,8 @@ void db_add_entries(Elfeed *app, std::vector<Entry> &entries)
 
 void db_query_entries(Elfeed *app, const Filter &filter,
                       std::vector<Entry> &out,
-                      int default_limit)
+                      int default_limit,
+                      bool ascending)
 {
     if (!app->db) return;
     out.clear();
@@ -640,7 +641,16 @@ void db_query_entries(Elfeed *app, const Filter &filter,
         }
     }
 
-    sql += " ORDER BY e.date DESC, e.namespace, e.id";
+    // idx_entry_date is declared `(date DESC, namespace, id)` —
+    // SQLite scans the same B-tree forward or reverse, so the ASC
+    // direction streams as cheaply as DESC without a separate
+    // sort step. Tiebreak columns are direction-irrelevant for
+    // user-visible ordering (only matter for stable iteration
+    // when dates collide, which happens often for undated entries
+    // backfilled with time(now)).
+    sql += ascending
+               ? " ORDER BY e.date ASC, e.namespace, e.id"
+               : " ORDER BY e.date DESC, e.namespace, e.id";
 
     // Explicit `#N` in the filter wins; otherwise fall back to
     // the caller's viewport-derived default (0 = unlimited).
