@@ -122,6 +122,17 @@ private:
                     }
                     if (std::regex_search(line, m, dest_re))
                         d.destination = m[1].str();
+                } else if (!line.empty()) {
+                    // Stderr lines: surface to the global log so
+                    // yt-dlp's "ERROR: …" / extractor failures are
+                    // visible in the Log panel rather than buried
+                    // in the per-item d.log (which has no UI).
+                    // Stdout chatter (progress, [info], [download])
+                    // stays in d.log only — too noisy for the panel.
+                    const std::string &label =
+                        d.title.empty() ? d.url : d.title;
+                    elfeed_log(app_, LOG_ERROR, "%s: %s",
+                               label.c_str(), line.c_str());
                 }
                 break;
             }
@@ -143,6 +154,11 @@ private:
                 if (!paused_) {
                     d.failures++;
                     d.log.push_back("Process exited with error");
+                    const std::string &label =
+                        d.title.empty() ? d.url : d.title;
+                    elfeed_log(app_, LOG_ERROR,
+                               "%s: subprocess exited with status %d",
+                               label.c_str(), status);
                 }
                 d.progress.clear();
                 break;
@@ -290,9 +306,14 @@ static void http_pump(Elfeed *app)
     } else if (item) {
         if (g_http->error != "cancelled") {
             item->failures++;
-            item->log.push_back(g_http->error.empty()
-                                    ? "HTTP download failed"
-                                    : g_http->error);
+            const std::string msg = g_http->error.empty()
+                                        ? "HTTP download failed"
+                                        : g_http->error;
+            item->log.push_back(msg);
+            const std::string &label =
+                item->title.empty() ? item->url : item->title;
+            elfeed_log(app, LOG_ERROR, "%s: %s",
+                       label.c_str(), msg.c_str());
         }
         item->progress.clear();
     }
@@ -404,6 +425,11 @@ void download_tick(Elfeed *app)
             if (d.id != next->id) continue;
             d.failures++;
             d.log.push_back("Failed to start process");
+            const std::string &label =
+                d.title.empty() ? d.url : d.title;
+            elfeed_log(app, LOG_ERROR,
+                       "%s: failed to start subprocess (%s)",
+                       label.c_str(), argv_owned[0].c_str());
             break;
         }
         return;
