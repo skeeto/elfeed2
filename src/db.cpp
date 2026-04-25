@@ -589,6 +589,7 @@ void db_query_entries(Elfeed *app, const Filter &filter,
 
     std::vector<std::string> where;
     std::vector<double> bind_doubles;
+    std::vector<std::string> bind_strings;
 
     // FTS MATCH goes first in the WHERE so the planner uses the
     // full-text index as the driving table. Bare table name is
@@ -608,16 +609,27 @@ void db_query_entries(Elfeed *app, const Filter &filter,
         bind_doubles.push_back(cutoff);
     }
 
-    // Tag filters via subquery
+    // Tag filters via subquery. Bind the tag value as a parameter
+    // rather than interpolating into the SQL — even though the
+    // tag string ultimately comes from the local user (filter bar
+    // or `preset` config, never from feed content, which goes
+    // through the parameterized db_tag write path), an apostrophe
+    // in a tag would otherwise break the prepared statement
+    // (e.g. an autotag like `o'connor`) and a `' OR '1'='1`-shape
+    // input would change the WHERE's logical structure.
     for (auto &tag : filter.must_have) {
         where.push_back(
             "EXISTS (SELECT 1 FROM entry_tag t WHERE"
-            " t.namespace=e.namespace AND t.entry_id=e.id AND t.tag='" + tag + "')");
+            " t.namespace=e.namespace AND t.entry_id=e.id AND"
+            " t.tag=?)");
+        bind_strings.push_back(tag);
     }
     for (auto &tag : filter.must_not_have) {
         where.push_back(
             "NOT EXISTS (SELECT 1 FROM entry_tag t WHERE"
-            " t.namespace=e.namespace AND t.entry_id=e.id AND t.tag='" + tag + "')");
+            " t.namespace=e.namespace AND t.entry_id=e.id AND"
+            " t.tag=?)");
+        bind_strings.push_back(tag);
     }
 
     if (!where.empty()) {
@@ -655,9 +667,9 @@ void db_query_entries(Elfeed *app, const Filter &filter,
         return;
     }
 
-    // Bind order matches WHERE order: FTS MATCH (if any), then
-    // date bounds. Tag filters are interpolated into SQL text
-    // (not bound parameters) so they don't consume a bind slot.
+    // Bind order matches WHERE-build order exactly: FTS MATCH
+    // (if any), date bounds, then must_have / must_not_have tag
+    // values in the order they were pushed.
     int bind_idx = 1;
     if (use_fts) {
         sqlite3_bind_text(stmt, bind_idx++, fts_match.c_str(),
@@ -665,6 +677,9 @@ void db_query_entries(Elfeed *app, const Filter &filter,
     }
     for (double d : bind_doubles)
         sqlite3_bind_double(stmt, bind_idx++, d);
+    for (auto &s : bind_strings)
+        sqlite3_bind_text(stmt, bind_idx++, s.c_str(),
+                          -1, SQLITE_TRANSIENT);
 
     // Pre-compile bare and `!` patterns once. The previous code did
     // `std::regex re(pat, ...)` *inside* the per-entry scan loop,
