@@ -1120,6 +1120,15 @@ void MainFrame::on_list_key(wxKeyEvent &e)
     // held modifier and on non-printable codes, so the Ctrl+L
     // and Escape handlers above still get through untouched.
     if (try_preset_key(e)) return;
+    // Arrow keys while visual-selection mode is active: route
+    // through move_selection so the anchor extends, same as j/k.
+    // Outside visual mode let the wxDataViewCtrl native handler
+    // run — its single-row move + autoscroll behavior is what
+    // users expect when they're not building a range.
+    if (visual_anchor_ >= 0 && plain) {
+        if (code == WXK_DOWN) { move_selection(+1); return; }
+        if (code == WXK_UP)   { move_selection(-1); return; }
+    }
     switch (code) {
     case 'J': if (plain) { move_selection(+1); return; } break;
     case 'K': if (plain) { move_selection(-1); return; } break;
