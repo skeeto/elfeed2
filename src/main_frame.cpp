@@ -969,6 +969,18 @@ void MainFrame::on_pane_close(wxAuiManagerEvent &e)
 
 void MainFrame::on_list_selected(wxDataViewEvent &)
 {
+    // wxDataViewCtrl's SELECTION_CHANGED event fires natively when
+    // the user clicks a row or moves with arrow keys — also (by
+    // accident, really) when programmatic Select() runs on macOS.
+    // It does NOT fire for programmatic Select() on Windows or
+    // Linux, so move_selection / go_to call sync_preview()
+    // themselves to cover j/k and friends. EntryDetail::show_entry
+    // guards against the resulting same-entry double-call.
+    sync_preview();
+}
+
+void MainFrame::sync_preview()
+{
     // Only render when the preview pane is actually visible.
     // Navigating entries with the pane hidden (the "headline
     // scan" pattern) otherwise ran a full DB detail-load + HTML
@@ -1329,6 +1341,7 @@ void MainFrame::move_selection(int delta)
         list_->select_only(target);
     }
     list_->ensure_visible_row(target);
+    sync_preview();
 }
 
 void MainFrame::go_to(long row)
@@ -1343,6 +1356,7 @@ void MainFrame::go_to(long row)
         list_->select_only(row);
     }
     list_->ensure_visible_row(row);
+    sync_preview();
 }
 
 void MainFrame::advance_from(long row)

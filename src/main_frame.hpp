@@ -116,6 +116,12 @@ private:
     void on_close(wxCloseEvent &);
     void on_list_selected(wxDataViewEvent &);
     void on_list_activated(wxDataViewEvent &);
+    // Drive a preview-pane refresh from whatever's currently the
+    // primary row. Bound to wxEVT_DATAVIEW_SELECTION_CHANGED via
+    // on_list_selected, but also called explicitly from
+    // move_selection / go_to because programmatic Select() doesn't
+    // fire that event on Windows or Linux (only on macOS).
+    void sync_preview();
     void on_list_context_menu(wxDataViewEvent &);
     void on_list_key(wxKeyEvent &);
     void on_filter_key(wxKeyEvent &);

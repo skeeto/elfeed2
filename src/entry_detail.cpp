@@ -135,6 +135,17 @@ void EntryDetail::scroll_lines(int lines)
 
 void EntryDetail::show_entry(Entry *e)
 {
+    // Same entry as last time → nothing to do. Re-rendering is
+    // expensive (DB detail load + HTML build + image cache pass)
+    // and the visible content wouldn't change. Callers that want
+    // to refresh the *same* entry's display (after a theme switch,
+    // after image-cache draining) call relayout() instead, which
+    // bypasses this guard. Important on platforms where
+    // wxDataViewCtrl's selection-changed event fires on
+    // programmatic Select() (macOS): without the guard, j/k would
+    // render twice — once from the event handler and once from
+    // move_selection's explicit sync_preview() call.
+    if (e == current_) return;
     current_ = e;
 
     if (!e) {
