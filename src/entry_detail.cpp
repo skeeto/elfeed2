@@ -162,7 +162,7 @@ void EntryDetail::show_entry(Entry *e)
     // read) so the subtitle and enclosure strip render properly.
     db_entry_load_details(app_, *e);
 
-    title_->SetLabel(wxString::FromUTF8(html_strip(e->title)));
+    title_->SetLabel(wxString::FromUTF8(e->title));
 
     std::string feed_title;
     auto fit = app_->feed_titles.find(e->feed_url);

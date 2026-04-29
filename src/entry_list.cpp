@@ -162,7 +162,7 @@ public:
             value = wxString::FromUTF8(format_date(e.date));
             return;
         case 1:
-            value = wxString::FromUTF8(html_strip(e.title));
+            value = wxString::FromUTF8(e.title);
             return;
         case 2: {
             auto it = app_->feed_titles.find(e.feed_url);
@@ -296,7 +296,7 @@ void EntryList::apply_sort()
                 if (a.date != b.date) c = a.date < b.date ? -1 : 1;
                 break;
             case 1:
-                c = ci_compare(html_strip(a.title), html_strip(b.title));
+                c = ci_compare(a.title, b.title);
                 break;
             case 2: {
                 auto at = app->feed_titles.find(a.feed_url);

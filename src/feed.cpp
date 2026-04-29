@@ -443,6 +443,31 @@ static std::string atom_content(pugi::xml_node entry)
     return result;
 }
 
+static std::string atom_text_construct(pugi::xml_node node,
+                                       const char *tag)
+{
+    auto text_node = find_child(node, tag);
+    if (!text_node) return {};
+
+    std::string type = attr_val(text_node, "type");
+    if (type.empty() || type == "text")
+        return text_node.child_value();
+
+    if (type == "html")
+        return html_strip(text_node.child_value());
+
+    if (type == "xhtml") {
+        std::string result;
+        for (auto child : text_node.children())
+            xml_unparse(child, result);
+        return html_strip(result);
+    }
+
+    // Unknown Atom text construct types are non-conforming; defaulting
+    // to text preserves data instead of guessing it is markup.
+    return text_node.child_value();
+}
+
 static std::vector<Author> atom_authors(pugi::xml_node node)
 {
     std::vector<Author> result;
@@ -474,14 +499,7 @@ static void parse_atom(const std::string &url, pugi::xml_node root,
         if (!feed_node) feed_node = root;
     }
 
-    // Titles arrive as `type="html"` in a lot of real-world Atom
-    // feeds even when the text looks like plain prose, so chars
-    // end up double-encoded in the XML (`&amp;#8211;` → XML
-    // decodes to `&#8211;` → html_strip decodes to en-dash).
-    // Running html_strip here decodes the HTML entities *once*,
-    // producing a clean display string. Plain-text titles with
-    // no HTML pass through unchanged.
-    result.feed_title = elfeed_cleanup(html_strip(child_text(feed_node, "title")));
+    result.feed_title = elfeed_cleanup(atom_text_construct(feed_node, "title"));
 
     auto feed_authors = atom_authors(feed_node);
     if (!feed_authors.empty())
@@ -497,7 +515,7 @@ static void parse_atom(const std::string &url, pugi::xml_node root,
         e.feed_url = url;
         e.namespace_ = ns;
 
-        e.title = elfeed_cleanup(html_strip(child_text(entry_node, "title")));
+        e.title = elfeed_cleanup(atom_text_construct(entry_node, "title"));
 
         // xml:base for this entry
         std::string entry_base = attr_val(entry_node, "base");
