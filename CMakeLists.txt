@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.25)
-project(elfeed2 VERSION 0.2.3 LANGUAGES C CXX)
+project(elfeed2 VERSION 0.2.4 LANGUAGES C CXX)
 
 # Local CMake modules (helpers + per-dep Fetch<X>.cmake files).
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
