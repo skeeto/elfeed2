@@ -868,7 +868,7 @@ void MainFrame::on_about(wxCommandEvent &)
     // what FetchContent pulls in CMakeLists — keep them in sync
     // when bumping deps.
     auto *deps = new wxTextCtrl(&dlg, wxID_ANY, wxT(
-        "  wxWidgets 3.2.10        wxWindows Library Licence\n"
+        "  wxWidgets 3.2.12        wxWindows Library Licence\n"
         "  cpp-httplib 0.43.0      MIT\n"
         "  mbedTLS 3.6.2           Apache License 2.0\n"
         "  pugixml 1.14            MIT\n"

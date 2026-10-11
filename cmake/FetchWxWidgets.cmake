@@ -11,7 +11,7 @@
 #     wxWidgets_USE_FILE) instead of targets. This is the typical
 #     Linux distro path (apt install libwxgtk3.2-dev).
 #
-# DEPS=FETCH — pull the pinned 3.2.10 release tarball, build statically.
+# DEPS=FETCH — pull the pinned 3.2.12 release tarball, build statically.
 
 if(DEPS STREQUAL "LOCAL")
   find_package(wxWidgets 3.2 QUIET CONFIG
@@ -104,7 +104,7 @@ endif()
 # there are no submodules to recurse.
 FetchContent_Declare(
   wxWidgets
-  URL      https://github.com/wxWidgets/wxWidgets/releases/download/v3.2.10/wxWidgets-3.2.10.tar.bz2
-  URL_HASH SHA256=d66e929569947a4a5920699539089a9bda83a93e5f4917fb313a61f0c344b896
+  URL      https://github.com/wxWidgets/wxWidgets/releases/download/v3.2.12/wxWidgets-3.2.12.tar.bz2
+  URL_HASH SHA256=a62719bb5e1dcc41c1a6fc1eecd499c7ee8521f70402c7b1bb3342a1e16344e0
 )
 FetchContent_MakeAvailable(wxWidgets)
