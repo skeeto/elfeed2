@@ -309,6 +309,11 @@ bool ElfeedApp::OnInit()
     wxConvCurrent = &wxConvUTF8;
 
     SetAppName("elfeed2");
+    // On wxGTK this becomes the Wayland app-id, which compositors
+    // match against elfeed2.desktop for the window icon and taskbar
+    // grouping. Otherwise it's argv[0]'s basename, which breaks when
+    // launched through a renamed binary, symlink, or wrapper.
+    SetClassName("elfeed2");
 
 #ifdef __WXMAC__
     augment_macos_path();
