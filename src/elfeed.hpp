@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <mutex>
 #include <queue>
+#include <regex>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -43,6 +44,12 @@ struct Entry {
     std::vector<std::string> tags;
 };
 
+// A config rule that adds tag when a regex matches an entry field.
+struct EntryTagRule {
+    std::regex pattern;
+    std::string tag;
+};
+
 struct Feed {
     std::string url;
     std::string title;        // self-declared by the feed
@@ -54,6 +61,8 @@ struct Feed {
     int failures = 0;
     double last_update = 0;
     std::vector<std::string> autotags;
+    std::vector<EntryTagRule> title_tag_rules;
+    std::vector<EntryTagRule> url_tag_rules;
 };
 
 // --- Filter ---

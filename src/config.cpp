@@ -26,6 +26,8 @@
 //   https://acoup.blog/feed/             # URL line opens a stanza
 //     title A Collection of Unmitigated Pedantry
 //     tag   blog history
+//     regex_entry_title ^Release: release
+//     regex_entry_url   /video/ video
 //
 //   youtube UCbtwi4wK1YXd9AyV_4UcE6g     # alias line opens a stanza
 //     title Adrian's Digital Basement
@@ -385,6 +387,35 @@ void config_load(Elfeed *app)
             }
             for (size_t i = 1; i < tokens.size(); i++)
                 app->feeds[(size_t)current].autotags.push_back(tokens[i]);
+            continue;
+        }
+        if (dir0 == "regex_entry_title" || dir0 == "regex_entry_url") {
+            if (current < 0) {
+                warn(dir0 + " line with no preceding feed URL", ln);
+                continue;
+            }
+            if (tokens.size() < 3) {
+                warn(dir0 + " needs a regex and a tag", ln);
+                continue;
+            }
+            try {
+                // The tag is the final token; preserving the rest of
+                // the line lets patterns match titles containing spaces.
+                std::string pattern = value_after_directive(line);
+                size_t tag_start = pattern.find_last_of(" \t");
+                pattern.resize(tag_start);
+                while (!pattern.empty() &&
+                       std::isspace((unsigned char)pattern.back()))
+                    pattern.pop_back();
+                EntryTagRule rule{std::regex(pattern), tokens.back()};
+                auto &feed = app->feeds[(size_t)current];
+                if (dir0 == "regex_entry_title")
+                    feed.title_tag_rules.push_back(std::move(rule));
+                else
+                    feed.url_tag_rules.push_back(std::move(rule));
+            } catch (const std::regex_error &e) {
+                warn(dir0 + ": invalid regex: " + e.what(), ln);
+            }
             continue;
         }
 

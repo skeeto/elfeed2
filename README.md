@@ -88,7 +88,10 @@ state.
 A line whose first token contains `://` opens a new feed stanza. Lines
 after it apply to that stanza until the next URL line. `title` overrides
 the feed's self-declared title; `tag` adds autotags (one or more per line,
-repeatable).
+repeatable). `regex_entry_title REGEX TAG` and `regex_entry_url REGEX TAG`
+add `TAG` when the entry title or link matches `REGEX`. Patterns use C++'s
+default regex grammar. the final whitespace-delimited token is
+the tag, so patterns may contain spaces.
 
     https://nullprogram.com/feed/
       title null program
@@ -96,6 +99,10 @@ repeatable).
 
     https://example.com/comic/feed/
       tag comic webcomic
+
+    https://example.com/feed/
+      regex_entry_title ^Release: release
+      regex_entry_url   /video/ video
 
 Indentation is cosmetic, and the parser doesn't require it.
 

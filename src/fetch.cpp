@@ -203,6 +203,12 @@ bool fetch_process_results(Elfeed *app)
             entry.tags.push_back("unread");
             for (auto &tag : feed->autotags)
                 entry.tags.push_back(tag);
+            for (auto &rule : feed->title_tag_rules)
+                if (std::regex_search(entry.title, rule.pattern))
+                    entry.tags.push_back(rule.tag);
+            for (auto &rule : feed->url_tag_rules)
+                if (std::regex_search(entry.link, rule.pattern))
+                    entry.tags.push_back(rule.tag);
             std::sort(entry.tags.begin(), entry.tags.end());
             entry.tags.erase(std::unique(entry.tags.begin(),
                                           entry.tags.end()),
