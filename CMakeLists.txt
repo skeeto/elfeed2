@@ -203,6 +203,28 @@ if(APPLE)
     # this; keeping it set is cheap insurance.
     MACOSX_BUNDLE_INFO_STRING          "Elfeed2 ${PROJECT_VERSION}, Public Domain"
   )
+
+  # A code-signing identity from the keychain, as listed by "security
+  # find-identity -p codesigning". Empty leaves the linker's ad-hoc
+  # signature. A Developer ID signs for distribution, which
+  # notarization requires to have the hardened runtime and a secure
+  # timestamp. The release pipeline builds unsigned and signs in a job
+  # of its own (.github/workflows/release.yml).
+  set(ELFEED2_SIGN_IDENTITY "" CACHE STRING
+      "macOS code-signing identity for the bundle (empty: ad hoc)")
+  if(ELFEED2_SIGN_IDENTITY MATCHES "^Developer ID Application")
+    set(elfeed2_signopts --options runtime --timestamp)
+  else()
+    set(elfeed2_signopts --timestamp=none)
+  endif()
+  if(ELFEED2_SIGN_IDENTITY)
+    add_custom_command(TARGET elfeed2 POST_BUILD
+      COMMAND codesign --force ${elfeed2_signopts}
+              --sign ${ELFEED2_SIGN_IDENTITY}
+              $<TARGET_BUNDLE_DIR:elfeed2>
+      VERBATIM
+    )
+  endif()
 endif()
 
 if(WIN32)
@@ -282,5 +304,14 @@ if(APPLE)
   # Limit the DMG to our `app` component — keeps subproject
   # install leftovers (mbedTLS headers / static libs) out.
   set(CPACK_COMPONENTS_ALL "app")
+  # With a Developer ID identity, cmake/notarize.cmake signs the image
+  # too and, given ELFEED2_NOTARY_PROFILE (from "xcrun notarytool
+  # store-credentials") or an App Store Connect API key in the
+  # environment, notarizes and staples it.
+  set(ELFEED2_NOTARY_PROFILE "" CACHE STRING
+      "notarytool keychain profile for notarizing the package (empty: none)")
+  set(CPACK_ELFEED2_SIGN_IDENTITY  "${ELFEED2_SIGN_IDENTITY}")
+  set(CPACK_ELFEED2_NOTARY_PROFILE "${ELFEED2_NOTARY_PROFILE}")
+  set(CPACK_POST_BUILD_SCRIPTS "${CMAKE_CURRENT_SOURCE_DIR}/cmake/notarize.cmake")
 endif()
 include(CPack)

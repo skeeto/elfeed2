@@ -54,14 +54,103 @@ jobs:
         # thrashing failure mode this avoids.
         run: cmake --build build --config Release -j 2
 
-      - name: Package (DMG)
-        run: cmake --build build --target package
+      # Unsigned beyond the linker's ad-hoc signature: sign-macos signs
+      # it, so that the certificate never shares a job with the build.
+      # tar keeps the bundle's symlinks and modes through the artifact.
+      - name: Upload app
+        run: tar czf elfeed2.app.tar.gz -C build elfeed2.app
 
-      - name: Upload DMG
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
+        with:
+          name: elfeed2-macos-app
+          path: elfeed2.app.tar.gz
+          if-no-files-found: error
+
+  # Signs the app with the Developer ID Application certificate, a .p12
+  # in base64 (MACOS_CERTIFICATE, with MACOS_CERTIFICATE_PASSWORD) put
+  # into a keychain made for the job, packs the disk image, and
+  # notarizes it with an App Store Connect API key (MACOS_NOTARY_KEY,
+  # the .p8's text, with MACOS_NOTARY_KEY_ID and MACOS_NOTARY_ISSUER)
+  # through cmake/notarize.cmake, which signs and staples the image.
+  sign-macos:
+    needs: build-macos
+    runs-on: macos-14
+    environment: release
+    env:
+      IDENTITY: 'Developer ID Application: Christopher Wellons (A7AR282GVM)'
+    steps:
+      - uses: actions/checkout@v4   # for cmake/notarize.cmake
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: elfeed2-macos-app
+          path: app
+
+      # A keychain of the job's own, with a random password, which
+      # codesign may use without asking, searched ahead of the others
+      - name: Import the certificate
+        env:
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        run: |
+          kc=$RUNNER_TEMP/signing.keychain-db
+          pw=$(openssl rand -hex 24)
+          security create-keychain -p "$pw" "$kc"
+          security set-keychain-settings -lut 3600 "$kc"
+          security unlock-keychain -p "$pw" "$kc"
+          printf %s "$MACOS_CERTIFICATE" | base64 -d >"$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$kc" \
+              -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          rm -f "$RUNNER_TEMP/cert.p12"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+              -s -k "$pw" "$kc" >/dev/null
+          # shellcheck disable=SC2046  # the list, one keychain per word
+          security list-keychains -d user -s "$kc" \
+              $(security list-keychains -d user | tr -d '"')
+          if ! security find-identity -v -p codesigning "$kc" | grep -qF "\"$IDENTITY\""; then
+              echo "::error::no identity \"$IDENTITY\" in the certificate"
+              exit 1
+          fi
+
+      # As ELFEED2_SIGN_IDENTITY signs in CMakeLists.txt: the hardened
+      # runtime and a secure timestamp. APFS for the image, per the
+      # CPACK_DMG_FILESYSTEM note there.
+      - name: Sign the app and make the disk image
+        run: |
+          v=$(grep -Eo 'project\(elfeed2 VERSION [^ ]+' CMakeLists.txt | cut -d' ' -f3)
+          mkdir "$RUNNER_TEMP/dmg"
+          tar xzf app/elfeed2.app.tar.gz -C "$RUNNER_TEMP/dmg"
+          a=$RUNNER_TEMP/dmg/elfeed2.app
+          codesign --force --options runtime --timestamp --sign "$IDENTITY" "$a"
+          codesign --verify --deep --strict --verbose=2 "$a"
+          ln -s /Applications "$RUNNER_TEMP/dmg/Applications"
+          mkdir out
+          hdiutil create -volname Elfeed2 -srcfolder "$RUNNER_TEMP/dmg" \
+              -fs APFS -format UDZO "out/elfeed2-$v-macos-arm64.dmg"
+          echo "DMG=out/elfeed2-$v-macos-arm64.dmg" >>"$GITHUB_ENV"
+
+      - name: Notarize
+        env:
+          MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
+          ELFEED2_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          ELFEED2_NOTARY_ISSUER: ${{ secrets.MACOS_NOTARY_ISSUER }}
+        run: |
+          export ELFEED2_NOTARY_KEY=$RUNNER_TEMP/notary.p8
+          printf '%s\n' "$MACOS_NOTARY_KEY" >"$ELFEED2_NOTARY_KEY"
+          cmake -DCPACK_PACKAGE_FILES="$PWD/$DMG" \
+                -DCPACK_ELFEED2_SIGN_IDENTITY="$IDENTITY" \
+                -P cmake/notarize.cmake
+
+      - name: Remove the keychain and key
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/signing.keychain-db" || true
+          rm -f "$RUNNER_TEMP/notary.p8" "$RUNNER_TEMP/cert.p12"
+
+      - uses: actions/upload-artifact@v4
         with:
           name: elfeed2-macos
-          path: build/elfeed2-*-macos-arm64.dmg
+          path: out/elfeed2-*-macos-arm64.dmg
           if-no-files-found: error
 
   build-windows:
@@ -112,7 +201,7 @@ jobs:
           if-no-files-found: error
 
   release:
-    needs: [build-macos, build-windows]
+    needs: [sign-macos, build-windows]
     runs-on: ubuntu-latest
     environment: release
     permissions:
