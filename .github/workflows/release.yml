@@ -23,14 +23,14 @@ jobs:
 
   build-macos:
     needs: verify-version
-    runs-on: macos-14
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
 
       # Cache the FetchContent output (wxWidgets, mbedTLS, sqlite,
       # pugixml, cpp-httplib) so the slow first-build cost amortizes
       # across runs. ImageVersion is GitHub's per-runner-image
-      # identifier — bumps when the macos-14 image is refreshed
+      # identifier — bumps when the macos-26 image is refreshed
       # (toolchain version moves with it).
       - name: Cache _deps
         uses: actions/cache@v4
@@ -48,7 +48,7 @@ jobs:
             -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
 
       - name: Build
-        # -j 2 keeps memory pressure manageable on the 14 GB mac-14
+        # -j 2 keeps memory pressure manageable on the macOS
         # runner; cached _deps means second-run cost is small even
         # at low parallelism. See build-windows for the swap-
         # thrashing failure mode this avoids.
@@ -74,7 +74,7 @@ jobs:
   # through cmake/notarize.cmake, which signs and staples the image.
   sign-macos:
     needs: build-macos
-    runs-on: macos-14
+    runs-on: macos-26
     environment: release
     env:
       IDENTITY: 'Developer ID Application: Christopher Wellons (A7AR282GVM)'
